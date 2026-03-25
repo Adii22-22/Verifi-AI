@@ -1,6 +1,6 @@
 # Changes Made - Frontend-Backend Integration
 
-## ✅ Fixed Issues
+##  Fixed Issues
 
 ### 1. **Enhanced AI Analysis (Real AI, Not Just Web Scraping)**
    - Updated `ai_agent.py` to use **structured JSON output** from Gemini AI
@@ -47,7 +47,7 @@ uvicorn src.api:app  --reload
 npm run dev
 ```
 
-## 📋 What's Different Now
+##  What's Different Now
 
 1. **Real AI Analysis**: The backend uses Gemini AI with structured output to provide comprehensive news credibility analysis
 2. **No Dummy Data**: Everything comes from real API calls
@@ -55,14 +55,14 @@ npm run dev
 4. **Structured Responses**: Backend returns JSON that matches frontend types exactly
 5. **Enhanced AI Prompt**: More detailed analysis instructions for better results
 
-## 🎨 Styling
+##  Styling
 
 - Tailwind CSS via CDN (configured in `index.html`)
 - Custom colors defined: `primary: #53d22d` (green)
 - Dark mode support
 - All colors should now display correctly
 
-## ⚠️ Important Notes
+## Important Notes
 
 1. **Environment Variables**: Make sure you have a `.env` file in `News-Credibility-AI-main/` with:
    ```
@@ -73,7 +73,7 @@ npm run dev
 
 3. **CORS**: Already configured for ports 3000 and 5173
 
-## 🚀 Next Steps
+##  Next Steps
 
 1. Start the backend server
 2. Start the frontend server  

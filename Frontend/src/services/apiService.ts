@@ -1,148 +1,201 @@
-import { AnalysisResult, TrendingArticle } from "../../types";
+import { AnalysisResult, TrendingArticle, HistoryItem, CompareResult } from "../../types";
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
 
-interface BackendAnalysisResponse extends AnalysisResult {
-  status: string;
-  input: string;
-}
-
-interface BackendNewsResponse {
-  articles: Array<{
-    title: string;
-    link: string;
-    summary: string;
-    published: string;
-  }>;
-}
-
-/**
- * Analyzes content using the backend API
- * Returns structured data directly from AI analysis
- */
-export const analyzeContent = async (text: string): Promise<AnalysisResult> => {
-  try {
-    const response = await fetch(`${API_BASE_URL}/analyze`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ text }),
-    });
-
-    if (!response.ok) {
-      const errorData = await response
-        .json()
-        .catch(() => ({ detail: response.statusText }));
-      throw new Error(errorData.detail || `API error: ${response.statusText}`);
-    }
-
-    const data: BackendAnalysisResponse = await response.json();
-
-    if (data.status === "error") {
-      throw new Error((data as any).message || "Analysis failed");
-    }
-
-    // Return the structured data directly (already matches AnalysisResult)
-    return {
-      trustScore: data.trustScore,
-      mlScore: data.mlScore,
-      factualAccuracy: data.factualAccuracy,
-      biasRating: data.biasRating,
-      headline: data.headline,
-      summary: data.summary,
-      summary_hi: data.summary_hi,
-      summary_mr: data.summary_mr,
-      tags: data.tags,
-      crossReferences: data.crossReferences,
-    };
-
-  } catch (error) {
-    console.error("Backend API Error:", error);
-    throw error; // Re-throw to let the UI handle it properly
-  }
+const getAuthHeaders = (): Record<string, string> => {
+  const token = localStorage.getItem("verifi_token");
+  return token
+    ? { "Content-Type": "application/json", Authorization: `Bearer ${token}` }
+    : { "Content-Type": "application/json" };
 };
 
-/**
- * Fetches trending news from the backend
- */
+// ─── Auth ─────────────────────────────────────────────────────────────────────
+
+export const registerUser = async (email: string, password: string, name: string) => {
+  const res = await fetch(`${API_BASE_URL}/register`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email, password, name }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }));
+    throw new Error(err.detail || "Registration failed");
+  }
+  return res.json();
+};
+
+export const loginUser = async (email: string, password: string) => {
+  const res = await fetch(`${API_BASE_URL}/login`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email, password }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }));
+    throw new Error(err.detail || "Login failed");
+  }
+  return res.json();
+};
+
+export const getMe = async () => {
+  const res = await fetch(`${API_BASE_URL}/me`, { headers: getAuthHeaders() });
+  if (!res.ok) return null;
+  return res.json();
+};
+
+// ─── Analyze ──────────────────────────────────────────────────────────────────
+
+export const analyzeContent = async (text: string): Promise<AnalysisResult> => {
+  const res = await fetch(`${API_BASE_URL}/analyze`, {
+    method: "POST",
+    headers: getAuthHeaders(),
+    body: JSON.stringify({ text }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }));
+    throw new Error(err.detail || `API error: ${res.statusText}`);
+  }
+  const data = await res.json();
+  return {
+    trustScore: data.trustScore,
+    factualAccuracy: data.factualAccuracy,
+    biasRating: data.biasRating,
+    headline: data.headline,
+    summary: data.summary,
+    summary_hi: data.summary_hi,
+    summary_mr: data.summary_mr,
+    tags: data.tags,
+    crossReferences: data.crossReferences,
+    claimVerdict: data.claimVerdict || [],
+    sourceReputation: data.sourceReputation || null,
+  };
+};
+
+// ─── Analyze Image ────────────────────────────────────────────────────────────
+
+export const analyzeImage = async (file: File): Promise<AnalysisResult> => {
+  const formData = new FormData();
+  formData.append("file", file);
+
+  const token = localStorage.getItem("verifi_token");
+  const headers: Record<string, string> = {};
+  if (token) headers["Authorization"] = `Bearer ${token}`;
+
+  const res = await fetch(`${API_BASE_URL}/analyze-image`, {
+    method: "POST",
+    headers,
+    body: formData,
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }));
+    throw new Error(err.detail || `Image analysis failed: ${res.statusText}`);
+  }
+  const data = await res.json();
+  return {
+    trustScore: data.trustScore,
+    factualAccuracy: data.factualAccuracy,
+    biasRating: data.biasRating,
+    headline: data.headline,
+    summary: data.summary,
+    summary_hi: data.summary_hi,
+    summary_mr: data.summary_mr,
+    tags: data.tags,
+    crossReferences: data.crossReferences || [],
+    claimVerdict: data.claimVerdict || [],
+    sourceReputation: data.sourceReputation || null,
+    // Image-specific fields
+    extracted_text: data.extracted_text,
+    is_manipulated: data.is_manipulated,
+    manipulation_signs: data.manipulation_signs || [],
+    content_type: data.content_type,
+  };
+};
+
+// ─── History ──────────────────────────────────────────────────────────────────
+
+export const fetchHistory = async (limit = 20, offset = 0): Promise<{ total: number; items: HistoryItem[] }> => {
+  const res = await fetch(`${API_BASE_URL}/history?limit=${limit}&offset=${offset}`, {
+    headers: getAuthHeaders(),
+  });
+  if (!res.ok) throw new Error("Failed to fetch history");
+  return res.json();
+};
+
+export const deleteHistoryItem = async (id: string): Promise<void> => {
+  const res = await fetch(`${API_BASE_URL}/history/${id}`, {
+    method: "DELETE",
+    headers: getAuthHeaders(),
+  });
+  if (!res.ok) throw new Error("Failed to delete history item");
+};
+
+// ─── Compare ─────────────────────────────────────────────────────────────────
+
+export const compareContent = async (claim_a: string, claim_b: string): Promise<CompareResult> => {
+  const res = await fetch(`${API_BASE_URL}/compare`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ claim_a, claim_b }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }));
+    throw new Error(err.detail || "Comparison failed");
+  }
+  return res.json();
+};
+
+// ─── Leaderboard ──────────────────────────────────────────────────────────────
+
+export const fetchLeaderboard = async () => {
+  const res = await fetch(`${API_BASE_URL}/leaderboard`);
+  if (!res.ok) throw new Error("Failed to fetch leaderboard");
+  return res.json();
+};
+
+// ─── News feed ────────────────────────────────────────────────────────────────
+
 export const fetchTrendingNews = async (): Promise<TrendingArticle[]> => {
   try {
-    const response = await fetch(`${API_BASE_URL}/news`);
+    const res = await fetch(`${API_BASE_URL}/news`);
+    if (!res.ok) throw new Error(`API error: ${res.statusText}`);
+    const data = await res.json();
 
-    if (!response.ok) {
-      throw new Error(`API error: ${response.statusText}`);
-    }
-
-    const data: BackendNewsResponse = await response.json();
-
-    // Transform backend news format to TrendingArticle format
-    return data.articles.slice(0, 12).map((article, idx) => {
-      // Generate a placeholder image URL (you can enhance this later)
-      const imageUrl = `https://picsum.photos/400/300?random=${idx}`;
-
-      // Extract source from link or title
-      const sourceMatch = article.link.match(/https?:\/\/(?:www\.)?([^\/]+)/);
-      const sourceDomain = sourceMatch
-        ? sourceMatch[1].replace("www.", "")
-        : "Unknown";
+    return data.articles.slice(0, 12).map((article: any, idx: number) => {
+      const sourceMatch = article.link?.match(/https?:\/\/(?:www\.)?([^\/]+)/);
+      const sourceDomain = sourceMatch ? sourceMatch[1].replace("www.", "") : "Unknown";
       const sourceName = sourceDomain.split(".")[0];
       const sourceInitial = sourceName.charAt(0).toUpperCase();
 
-      // Generate trust score (you could enhance this with actual analysis)
-      const trustScore = 85 + Math.floor(Math.random() * 15);
-
-      // Determine source color based on domain
       const sourceColors: Record<string, string> = {
-        reuters: "bg-[#0056B3]",
-        bbc: "bg-[#BB0000]",
-        cnn: "bg-[#CC0000]",
-        bloomberg: "bg-black",
-        wsj: "bg-[#0056B3]",
+        reuters: "bg-[#0056B3]", bbc: "bg-[#BB0000]", cnn: "bg-[#CC0000]",
+        bloomberg: "bg-black", wsj: "bg-[#0056B3]", ndtv: "bg-[#E31E24]",
+        thehindu: "bg-[#1A237E]", hindustan: "bg-[#FF6B35]",
       };
-      const sourceColor =
-        sourceColors[sourceName.toLowerCase()] || "bg-slate-600";
+      const sourceColor = sourceColors[sourceName.toLowerCase()] || "bg-slate-600";
 
-      // Extract category from title or summary
-      const categories = [
-        "Technology",
-        "Finance",
-        "Politics",
-        "Science",
-        "Health",
-        "Sports",
-        "Entertainment",
-      ];
+      // Use consistent picsum seed (not random) as fallback for missing og:image
+      const image = article.image || `https://picsum.photos/seed/${encodeURIComponent(article.title.slice(0, 20))}/400/300`;
+
+      const categories = ["Technology", "Finance", "Politics", "Science", "Health", "Sports", "Entertainment", "World"];
       const category =
-        categories.find(
-          (cat) =>
-            article.title.toLowerCase().includes(cat.toLowerCase()) ||
-            article.summary.toLowerCase().includes(cat.toLowerCase())
-        ) || categories[Math.floor(Math.random() * categories.length)];
+        categories.find((cat) =>
+          article.title.toLowerCase().includes(cat.toLowerCase()) ||
+          (article.summary || "").toLowerCase().includes(cat.toLowerCase())
+        ) || "World";
 
-      // Calculate time ago from published date
-      let timeAgo = "1h ago";
+      let timeAgo = "Recent";
       try {
         const pubDate = new Date(article.published);
-        const now = new Date();
-        const diffHours = Math.floor(
-          (now.getTime() - pubDate.getTime()) / (1000 * 60 * 60)
-        );
+        const diffHours = Math.floor((Date.now() - pubDate.getTime()) / 3_600_000);
         if (diffHours < 1) timeAgo = "Just now";
-        else if (diffHours === 1) timeAgo = "1h ago";
         else if (diffHours < 24) timeAgo = `${diffHours}h ago`;
-        else {
-          const diffDays = Math.floor(diffHours / 24);
-          timeAgo = `${diffDays}d ago`;
-        }
-      } catch (e) {
-        // Keep default
-      }
+        else timeAgo = `${Math.floor(diffHours / 24)}d ago`;
+      } catch (_) {}
 
       return {
         id: `trending-${idx}`,
-        image: imageUrl,
-        trustScore,
+        image,
+        trustScore: 0, // not analyzed yet — no fake score
         source: sourceName.charAt(0).toUpperCase() + sourceName.slice(1),
         sourceColor,
         sourceInitial,

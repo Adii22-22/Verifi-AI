@@ -1,230 +1,353 @@
 import os
 import json
+import time
+import logging
 from typing import Dict, Any
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from google import genai
 from dotenv import load_dotenv
+from services.search import get_verification_context
 
 load_dotenv()
 
-
+logger = logging.getLogger(__name__)
 GEMINI_MODEL_NAME = os.getenv("GEMINI_MODEL_NAME", "gemini-2.5-flash")
 
-def _get_gemini_client() -> genai.Client:
+
+def _get_client() -> genai.Client:
     api_key = os.getenv("GEMINI_API_KEY")
     if not api_key:
-        raise Exception(
-            "GEMINI_API_KEY is not set. Please set it in your environment before running the app."
-        )
+        raise Exception("GEMINI_API_KEY is not set.")
     return genai.Client(api_key=api_key)
 
-def analyze_credibility(article_text: str, external_evidence: str) -> Dict[str, Any]:
-    """
-    Uses Google Gemini to analyze credibility with structured JSON output.
-    Returns a dictionary matching the frontend AnalysisResult interface.
-    """
-    max_chars_article = 4000
-    max_chars_evidence = 3000
 
-    article_snippet = (article_text or "")[:max_chars_article]
-    evidence_snippet = (external_evidence or "")[:max_chars_evidence]
-
-    # Extract headline from article text
-    headline = article_snippet.split('\n')[0][:100] if article_snippet else "News Analysis"
-    if len(headline) > 100:
-        headline = headline[:97] + "..."
-
-    prompt = f"""You are an expert AI News Analyst specializing in fact-checking, bias detection, and credibility assessment.
-
-TASK: Analyze the following news content for credibility, factual accuracy, bias, and provide a comprehensive analysis.
-
-IMPORTANT:
-If the input claim is incorrect or misleading, explicitly state that it is false
-and provide the correct verified information in the summary.
-Do not only summarize — correct the misinformation.
-
-
---- INPUT TEXT / CLAIM ---
-{article_snippet}
-
---- EXTERNAL NEWS EVIDENCE ---
-{evidence_snippet}
-
---- ANALYSIS REQUIREMENTS ---
-1. CREDIBILITY ASSESSMENT: Score from 0-100 based on:
-   - Factual accuracy and verification against evidence
-   - Source reliability and cross-referencing
-   - Consistency with trusted sources (BBC, Reuters, AP, etc.)
-   - Absence of manipulative language or disinformation patterns
-
-2. FACTUAL ACCURACY: Rate as "High", "Medium", or "Low" based on:
-   - How well claims match verified evidence
-   - Presence of factual errors or unverified claims
-
-3. BIAS RATING: Determine as "Left", "Right", "Neutral", or "Mixed" by analyzing:
-   - Political framing and language
-   - Selective presentation of facts
-   - Emotional manipulation techniques
-
-4. ANALYSIS SUMMARY:
-Provide a 2–3 sentence analysis.
-If the claim is false or misleading, clearly state the correction with verified facts.
-
-
-5. TAGS: Identify 3 relevant topic categories (e.g., Technology, Finance, Politics, Science, Health, Sports, Entertainment)
-
-6. CROSS-REFERENCES: Extract up to 3 trusted sources mentioned in the evidence with their reliability indicators.
-
-7. MULTILINGUAL OUTPUT:
-   Provide the same summary translated into:
-   - Hindi
-   - Marathi
-
-
-Be thorough, objective, and base your assessment on the evidence provided."""
-
-    # Define the JSON schema for structured output
-    response_schema = {
-        "type": "object",
-        "properties": {
-            "trustScore": {
-                "type": "integer",
-                "description": "Credibility score from 0-100",
-                "minimum": 0,
-                "maximum": 100
-            },
-            "factualAccuracy": {
-                "type": "string",
-                "enum": ["High", "Medium", "Low"],
-                "description": "Level of factual accuracy"
-            },
-            "biasRating": {
-                "type": "string",
-                "enum": ["Left", "Right", "Neutral", "Mixed"],
-                "description": "Political bias assessment"
-            },
-            "headline": {
-                "type": "string",
-                "description": "A concise headline summarizing the analyzed content"
-            },
-            "summary": {
-                "type": "string",
-                "description": "A 2-3 sentence comprehensive analysis of credibility, factual accuracy, bias, and key findings"
-            },
-            "summary_hi": {
-                "type": "string",
-                "description": "Hindi translation of the summary"
-            },
-            "summary_mr": {
-                "type": "string",
-                "description": "Marathi translation of the summary"
-            },
-            "tags": {
-                "type": "array",
-                "items": {"type": "string"},
-                "minItems": 3,
-                "maxItems": 3,
-                "description": "Exactly 3 relevant topic tags"
-            },
-            "crossReferences": {
-                "type": "array",
-                "items": {
-                    "type": "object",
-                    "properties": {
-                        "source": {"type": "string"},
-                        "sourceInitials": {"type": "string"},
-                        "timeAgo": {"type": "string"},
-                        "trustColor": {
-                            "type": "string",
-                            "enum": ["primary", "yellow", "red", "gray"]
-                        }
-                    }
-                },
-                "maxItems": 3
-            }
-        },
-        "required": ["trustScore", "factualAccuracy", "biasRating", "headline", "summary", "tags", "crossReferences"]
-    }
-
-    try:
-        client = _get_gemini_client()
-        
-        # Use generate_content with JSON response format
-        # The google-genai library uses a different format for structured output
+def _generate(client: genai.Client, prompt: str, schema: dict | None = None) -> str:
+    """Single Gemini call with automatic 429 retry."""
+    config = {"response_mime_type": "application/json", "response_schema": schema} if schema else {}
+    for attempt in range(3):
         try:
-            # Try with structured output first (for newer API versions)
             response = client.models.generate_content(
                 model=GEMINI_MODEL_NAME,
                 contents=prompt,
-                config={
-                    "response_mime_type": "application/json",
-                    "response_schema": response_schema
-                }
+                config=config if config else None,
             )
-        except (TypeError, AttributeError):
-            # Fallback: request JSON in prompt and parse manually
-            json_prompt = f"""{prompt}
+            text = getattr(response, "text", None) or ""
+            cleaned = text.strip()
+            for marker in ["```json", "```"]:
+                if cleaned.startswith(marker):
+                    cleaned = cleaned[len(marker):]
+            if cleaned.endswith("```"):
+                cleaned = cleaned[:-3]
+            return cleaned.strip()
+        except Exception as e:
+            err = str(e)
+            if "429" in err or "RESOURCE_EXHAUSTED" in err:
+                wait = (attempt + 1) * 15
+                logger.warning(f"Rate limit hit. Retrying in {wait}s...")
+                if attempt < 2:
+                    time.sleep(wait)
+                else:
+                    raise Exception("Gemini rate limit. Wait a minute and retry.")
+            else:
+                raise
 
-IMPORTANT: Respond ONLY with valid JSON matching this exact structure:
-{json.dumps({
-    "trustScore": 85,
-    "factualAccuracy": "High",
-    "biasRating": "Neutral",
-    "headline": "Example Headline",
-    "summary": "Example summary",
-    "tags": ["Technology", "Finance", "Politics"],
-    "crossReferences": [
-        {{"source": "Reuters", "sourceInitials": "RT", "timeAgo": "2 hours ago", "trustColor": "primary"}}
-    ]
-}, indent=2)}
 
-Do not include any text before or after the JSON."""
-            
-            response = client.models.generate_content(
-                model=GEMINI_MODEL_NAME,
-                contents=json_prompt
-            )
-        
-        # Parse the JSON response
-        text = getattr(response, "text", None)
-        if not text:
-            raise Exception("Gemini returned no text.")
-        
-        # Clean up the response (remove markdown code blocks if present)
-        cleaned_text = text.strip()
-        if cleaned_text.startswith("```json"):
-            cleaned_text = cleaned_text[7:]
-        if cleaned_text.startswith("```"):
-            cleaned_text = cleaned_text[3:]
-        if cleaned_text.endswith("```"):
-            cleaned_text = cleaned_text[:-3]
-        cleaned_text = cleaned_text.strip()
-        
-        result = json.loads(cleaned_text)
-        result.setdefault("summary_hi", result["summary"])
-        result.setdefault("summary_mr", result["summary"])
+_ANALYSIS_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "trustScore":       {"type": "integer", "minimum": 0, "maximum": 100},
+        "factualAccuracy":  {"type": "string", "enum": ["High", "Medium", "Low"]},
+        "biasRating":       {"type": "string", "enum": ["Left", "Right", "Neutral", "Mixed"]},
+        "headline":         {"type": "string"},
+        "headline_hi":      {"type": "string"},
+        "headline_mr":      {"type": "string"},
+        "summary":          {"type": "string"},
+        "summary_hi":       {"type": "string"},
+        "summary_mr":       {"type": "string"},
+        "tags":             {"type": "array", "items": {"type": "string"}, "minItems": 3, "maxItems": 3},
+        "crossReferences": {
+            "type": "array", "maxItems": 3,
+            "items": {
+                "type": "object",
+                "properties": {
+                    "source":         {"type": "string"},
+                    "sourceInitials": {"type": "string"},
+                    "timeAgo":        {"type": "string"},
+                    "trustColor":     {"type": "string", "enum": ["primary", "yellow", "red", "gray"]},
+                    "url":            {"type": "string"},
+                },
+            },
+        },
+        "claimVerdict": {
+            "type": "array", "maxItems": 3,
+            "items": {
+                "type": "object",
+                "properties": {
+                    "claim":     {"type": "string"},
+                    "claim_hi":  {"type": "string"},
+                    "claim_mr":  {"type": "string"},
+                    "verdict":   {"type": "string", "enum": ["Verified", "False", "Unverified", "Misleading"]},
+                    "reason":    {"type": "string"},
+                    "reason_hi": {"type": "string"},
+                    "reason_mr": {"type": "string"},
+                },
+            },
+        },
+    },
+    "required": ["trustScore", "factualAccuracy", "biasRating", "headline", "headline_hi", "headline_mr", "summary",
+                 "summary_hi", "summary_mr", "tags", "crossReferences", "claimVerdict"],
+}
 
-        
-        # Ensure headline is set (use provided or extract from article)
-        if not result.get("headline") or result["headline"].strip() == "":
-            result["headline"] = headline
-        
-        # Ensure we have exactly 3 tags
-        if len(result.get("tags", [])) != 3:
-            tags = result.get("tags", [])
-            while len(tags) < 3:
-                tags.append("General")
-            result["tags"] = tags[:3]
-        
-        # Ensure crossReferences is a list
-        if not isinstance(result.get("crossReferences"), list):
-            result["crossReferences"] = []
-        
-        # Limit crossReferences to 3
-        result["crossReferences"] = result["crossReferences"][:3]
-        
-        return result
-        
+
+def analyze_credibility(article_text: str, _unused: str = "") -> Dict[str, Any]:
+    """
+    Fast single-step pipeline:
+      1. One DuckDuckGo search for the article/claim
+      2. One Gemini call that extracts claims, verifies, and synthesizes verdict
+    """
+    client = _get_client()
+
+    # Single search — use 4 results for speed (not 6)
+    evidence = get_verification_context(article_text[:150], max_results=4)
+    if not evidence or evidence == "NO_EVIDENCE_FOUND":
+        evidence = "No external evidence retrieved."
+
+    prompt = f"""You are an expert AI News Analyst specializing in fact-checking, bias detection, and credibility assessment.
+
+TASK: Produce a comprehensive credibility report for the article/claim below.
+
+--- ARTICLE / CLAIM ---
+{article_text[:3000]}
+
+--- VERIFICATION EVIDENCE (from news search) ---
+{evidence[:3000]}
+
+INSTRUCTIONS:
+1. TRUST SCORE (0–100): Score based on evidence support, source quality, factual consistency.
+   - 80–100 = Well-supported by evidence
+   - 60–79 = Mostly accurate, minor issues
+   - 40–59 = Mixed evidence, proceed with caution
+   - 0–39 = Contradicted by evidence or lacks support
+2. FACTUAL ACCURACY: "High" / "Medium" / "Low"
+3. BIAS RATING: "Left" / "Right" / "Neutral" / "Mixed"
+4. HEADLINE: One-line concise summary of your finding.
+5. SUMMARY: 2–3 sentences analyzing the content. If false, state the correction clearly.
+6. CLAIM VERDICT: Identify up to 3 key factual claims from the text. For each: verdict (Verified/False/Unverified/Misleading) + one-sentence reason based on evidence.
+7. TAGS: Exactly 3 topic tags (e.g. Technology, Politics, Health).
+8. CROSS-REFERENCES: Up to 3 sources from the evidence section.
+9. _hi fields: Provide Hindi (हिंदी) translations for headline, summary, claim, and reason.
+10. _mr fields: Provide Marathi (मराठी) translations for headline, summary, claim, and reason.
+
+IMPORTANT: For cross-references, use the actual URLs from the LINK fields in the evidence section above. Do NOT fabricate URLs.
+
+Be objective, evidence-based, and concise."""
+
+    raw = _generate(client, prompt, schema=_ANALYSIS_SCHEMA)
+
+    try:
+        result = json.loads(raw)
     except json.JSONDecodeError as e:
-        raise Exception(f"Failed to parse AI response as JSON: {e}")
-    except Exception as e:
-        raise Exception(f"Gemini analysis failed: {e}")
+        raise Exception(f"Failed to parse AI response: {e}\nRaw: {raw[:300]}")
+
+    # Defaults
+    result.setdefault("summary_hi", result.get("summary", ""))
+    result.setdefault("summary_mr", result.get("summary", ""))
+    result.setdefault("claimVerdict", [])
+    result.setdefault("crossReferences", [])
+    if not result.get("headline"):
+        result["headline"] = article_text.split("\n")[0][:100]
+    tags = result.get("tags", [])
+    while len(tags) < 3:
+        tags.append("General")
+    result["tags"] = tags[:3]
+
+    return result
+
+
+def compare_claims(claim_a: str, claim_b: str) -> Dict[str, Any]:
+    """Compare two claims — single Gemini call."""
+    client = _get_client()
+
+    # Run BOTH searches in parallel — cuts search time in HALF
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        future_a = pool.submit(get_verification_context, claim_a, 3)
+        future_b = pool.submit(get_verification_context, claim_b, 3)
+        evidence_a = future_a.result()
+        evidence_b = future_b.result()
+
+    schema = {
+        "type": "object",
+        "properties": {
+            "winner":          {"type": "string", "enum": ["claim_a", "claim_b", "tie"]},
+            "confidence":      {"type": "string", "enum": ["High", "Medium", "Low"]},
+            "reasoning":       {"type": "string"},
+            "claim_a_score":   {"type": "integer", "minimum": 0, "maximum": 100},
+            "claim_b_score":   {"type": "integer", "minimum": 0, "maximum": 100},
+            "claim_a_verdict": {"type": "string", "enum": ["Verified", "False", "Misleading", "Unverified"]},
+            "claim_b_verdict": {"type": "string", "enum": ["Verified", "False", "Misleading", "Unverified"]},
+            "summary":         {"type": "string"},
+        },
+        "required": ["winner", "confidence", "reasoning", "claim_a_score", "claim_b_score",
+                     "claim_a_verdict", "claim_b_verdict", "summary"],
+    }
+
+    prompt = f"""Compare these two claims for credibility. Use evidence to determine which is better supported.
+
+CLAIM A: {claim_a}
+CLAIM B: {claim_b}
+
+EVIDENCE FOR CLAIM A:
+{evidence_a[:2000] if evidence_a != 'NO_EVIDENCE_FOUND' else 'No evidence found.'}
+
+EVIDENCE FOR CLAIM B:
+{evidence_b[:2000] if evidence_b != 'NO_EVIDENCE_FOUND' else 'No evidence found.'}
+
+Provide credibility scores, verdicts, and a 3-sentence reasoning."""
+
+    raw = _generate(client, prompt, schema=schema)
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError as e:
+        raise Exception(f"Failed to parse compare response: {e}")
+
+
+# ─── Image / Photo Analysis ───────────────────────────────────────────────────
+
+_IMAGE_ANALYSIS_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "extracted_text":   {"type": "string"},
+        "is_manipulated":   {"type": "boolean"},
+        "manipulation_signs": {"type": "array", "items": {"type": "string"}, "maxItems": 5},
+        "content_type":     {"type": "string", "enum": ["news_article", "social_media_post", "infographic", "meme", "screenshot", "other"]},
+        "trustScore":       {"type": "integer", "minimum": 0, "maximum": 100},
+        "factualAccuracy":  {"type": "string", "enum": ["High", "Medium", "Low"]},
+        "biasRating":       {"type": "string", "enum": ["Left", "Right", "Neutral", "Mixed"]},
+        "headline":         {"type": "string"},
+        "headline_hi":      {"type": "string"},
+        "headline_mr":      {"type": "string"},
+        "summary":          {"type": "string"},
+        "summary_hi":       {"type": "string"},
+        "summary_mr":       {"type": "string"},
+        "tags":             {"type": "array", "items": {"type": "string"}, "minItems": 3, "maxItems": 3},
+        "claimVerdict": {
+            "type": "array", "maxItems": 3,
+            "items": {
+                "type": "object",
+                "properties": {
+                    "claim":     {"type": "string"},
+                    "claim_hi":  {"type": "string"},
+                    "claim_mr":  {"type": "string"},
+                    "verdict":   {"type": "string", "enum": ["Verified", "False", "Unverified", "Misleading"]},
+                    "reason":    {"type": "string"},
+                    "reason_hi": {"type": "string"},
+                    "reason_mr": {"type": "string"},
+                },
+            },
+        },
+        "crossReferences": {
+            "type": "array", "maxItems": 3,
+            "items": {
+                "type": "object",
+                "properties": {
+                    "source":         {"type": "string"},
+                    "sourceInitials": {"type": "string"},
+                    "timeAgo":        {"type": "string"},
+                    "trustColor":     {"type": "string", "enum": ["primary", "yellow", "red", "gray"]},
+                    "url":            {"type": "string"},
+                },
+            },
+        },
+    },
+    "required": ["extracted_text", "is_manipulated", "content_type", "trustScore",
+                 "factualAccuracy", "biasRating", "headline", "headline_hi", "headline_mr", "summary",
+                 "summary_hi", "summary_mr", "tags", "claimVerdict", "crossReferences"],
+}
+
+
+def analyze_image(image_bytes: bytes, mime_type: str = "image/jpeg") -> Dict[str, Any]:
+    """
+    Analyze a news image/screenshot using Gemini Vision.
+    Extracts text, detects manipulation, and fact-checks claims.
+    """
+    client = _get_client()
+
+    # First: extract text from image with Gemini Vision
+    extract_response = client.models.generate_content(
+        model=GEMINI_MODEL_NAME,
+        contents=[
+            {"text": "Extract ALL text visible in this image. Return only the extracted text, nothing else."},
+            {"inline_data": {"mime_type": mime_type, "data": image_bytes}},
+        ],
+    )
+    extracted_text = getattr(extract_response, "text", "") or ""
+
+    # Search for evidence CONCURRENTLY while we have the extracted text
+    # Use first 150 chars of extracted text for faster search
+    search_text = extracted_text[:150] if extracted_text.strip() else "news image analysis"
+    evidence = get_verification_context(search_text, max_results=4)
+    if not evidence or evidence == "NO_EVIDENCE_FOUND":
+        evidence = "No external evidence retrieved."
+
+    # Full analysis with image + extracted text + evidence
+    prompt = f"""You are an expert AI Image and News Analyst specializing in detecting misinformation, image manipulation, and propaganda in visual media.
+
+TASK: Analyze this image for credibility. The image appears to be a news-related image (screenshot, social media post, infographic, meme, etc.).
+
+--- EXTRACTED TEXT FROM IMAGE ---
+{extracted_text[:3000]}
+
+--- VERIFICATION EVIDENCE (from news search) ---
+{evidence[:3000]}
+
+INSTRUCTIONS:
+1. EXTRACTED TEXT: Confirm and refine the text extracted from the image.
+2. IS MANIPULATED: Check for signs of image manipulation (cropped context, edited text, doctored photos, misleading framing).
+3. MANIPULATION SIGNS: List any specific signs of manipulation found (empty list if none).
+4. CONTENT TYPE: Classify the image (news_article, social_media_post, infographic, meme, screenshot, other).
+5. TRUST SCORE (0-100): Based on the claims in the image and evidence support.
+6. FACTUAL ACCURACY, BIAS RATING, HEADLINE, SUMMARY: Same as text analysis.
+7. CLAIM VERDICT: Fact-check up to 3 claims found in the image.
+8. CROSS-REFERENCES: Up to 3 sources with URLs from the evidence.
+9. summary_hi: Hindi translation. summary_mr: Marathi translation.
+10. TAGS: 3 topic tags.
+
+IMPORTANT: For cross-references, use actual URLs from the evidence LINK fields. Do NOT fabricate URLs.
+Be especially vigilant about propaganda, out-of-context images, and misleading infographics."""
+
+    # Use vision API with image + text prompt
+    config = {"response_mime_type": "application/json", "response_schema": _IMAGE_ANALYSIS_SCHEMA}
+    response = client.models.generate_content(
+        model=GEMINI_MODEL_NAME,
+        contents=[
+            {"text": prompt},
+            {"inline_data": {"mime_type": mime_type, "data": image_bytes}},
+        ],
+        config=config,
+    )
+
+    raw = getattr(response, "text", "") or ""
+    cleaned = raw.strip()
+    for marker in ["```json", "```"]:
+        if cleaned.startswith(marker):
+            cleaned = cleaned[len(marker):]
+    if cleaned.endswith("```"):
+        cleaned = cleaned[:-3]
+
+    try:
+        result = json.loads(cleaned.strip())
+    except json.JSONDecodeError as e:
+        raise Exception(f"Failed to parse image analysis response: {e}\nRaw: {raw[:300]}")
+
+    # Defaults
+    result.setdefault("summary_hi", result.get("summary", ""))
+    result.setdefault("summary_mr", result.get("summary", ""))
+    result.setdefault("claimVerdict", [])
+    result.setdefault("crossReferences", [])
+    result.setdefault("manipulation_signs", [])
+    tags = result.get("tags", [])
+    while len(tags) < 3:
+        tags.append("General")
+    result["tags"] = tags[:3]
+
+    return result

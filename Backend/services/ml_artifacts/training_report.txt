@@ -1,0 +1,28 @@
+Verifi.ai — ML Training Report
+========================================
+Dataset: 4000 samples (50% fake, 50% real)
+Train/Test Split: 80/20
+Vectorizer: TF-IDF (max_features=5000, ngram_range=(1,2))
+Model: SGDClassifier (loss=modified_huber)
+
+Results:
+  Accuracy:  1.0000 (100.0%)
+  Precision: 1.0000
+  Recall:    1.0000
+  F1 Score:  1.0000
+
+Confusion Matrix:
+              Predicted
+              FAKE  REAL
+  Actual FAKE   400     0
+  Actual REAL     0   400
+
+              precision    recall  f1-score   support
+
+        FAKE       1.00      1.00      1.00       400
+        REAL       1.00      1.00      1.00       400
+
+    accuracy                           1.00       800
+   macro avg       1.00      1.00      1.00       800
+weighted avg       1.00      1.00      1.00       800
+

@@ -3,7 +3,7 @@ import { TrendingArticle } from '../../types';
 import { fetchTrendingNews } from '../services/apiService';
 
 interface TrendingSectionProps {
-    onCardClick: (headline: string) => void;
+  onCardClick: (headline: string) => void;
 }
 
 const TrendingSection: React.FC<TrendingSectionProps> = ({ onCardClick }) => {
@@ -11,97 +11,78 @@ const TrendingSection: React.FC<TrendingSectionProps> = ({ onCardClick }) => {
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
-    const loadTrendingNews = async () => {
-      setIsLoading(true);
-      try {
-        const news = await fetchTrendingNews();
-        setTrendingData(news);
-      } catch (error) {
-        console.error('Failed to load trending news:', error);
-        setTrendingData([]);
-      } finally {
-        setIsLoading(false);
-      }
-    };
-
-    loadTrendingNews();
+    fetchTrendingNews()
+      .then(setTrendingData)
+      .catch(() => setTrendingData([]))
+      .finally(() => setIsLoading(false));
   }, []);
+
   return (
-    <section className="flex flex-col gap-6 opacity-0 animate-[fadeIn_0.5s_ease-out_0.6s_forwards]">
+    <section className="flex flex-col gap-5 opacity-0 animate-[fadeIn_0.5s_ease-out_0.6s_forwards]">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
           <div className="size-8 rounded-lg bg-primary/10 flex items-center justify-center text-primary">
-            <span className="material-symbols-outlined text-lg">trending_up</span>
+            <span className="material-symbols-outlined text-lg">newspaper</span>
           </div>
-          <h2 className="text-xl font-bold text-slate-900 dark:text-white">Trending Analysis</h2>
+          <div>
+            <h2 className="text-xl font-bold text-slate-900 dark:text-white">Live Headlines</h2>
+            <p className="text-xs text-slate-400 mt-0.5">Tap any headline to run an AI fact-check</p>
+          </div>
         </div>
-        <div className="flex gap-2">
-          <button className="p-2 text-slate-400 hover:text-primary transition-colors rounded-lg hover:bg-slate-100 dark:hover:bg-white/5">
-            <span className="material-symbols-outlined text-[20px]">chevron_left</span>
-          </button>
-          <button className="p-2 text-slate-400 hover:text-primary transition-colors rounded-lg hover:bg-slate-100 dark:hover:bg-white/5">
-            <span className="material-symbols-outlined text-[20px]">chevron_right</span>
-          </button>
+        <div className="flex items-center gap-2 text-xs text-slate-400">
+          <span className="size-2 rounded-full bg-primary animate-pulse" />
+          Live
         </div>
       </div>
 
       {isLoading ? (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-          {[...Array(4)].map((_, idx) => (
-            <div key={idx} className="bg-white dark:bg-card-dark rounded-2xl border border-gray-200 dark:border-white/5 overflow-hidden animate-pulse">
-              <div className="h-48 bg-slate-200 dark:bg-slate-700"></div>
-              <div className="p-5 space-y-3">
-                <div className="h-4 bg-slate-200 dark:bg-slate-700 rounded w-20"></div>
-                <div className="h-6 bg-slate-200 dark:bg-slate-700 rounded"></div>
-                <div className="h-4 bg-slate-200 dark:bg-slate-700 rounded w-24"></div>
-              </div>
-            </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+          {[...Array(6)].map((_, i) => (
+            <div key={i} className="h-32 bg-white dark:bg-card-dark rounded-2xl border border-gray-200 dark:border-white/5 animate-pulse" />
           ))}
         </div>
       ) : trendingData.length === 0 ? (
         <div className="text-center py-12 text-slate-500 dark:text-slate-400">
-          <span className="material-symbols-outlined text-4xl mb-2">news</span>
-          <p>No trending news available at the moment.</p>
+          <span className="material-symbols-outlined text-4xl mb-2 block">newspaper</span>
+          <p>No headlines available right now.</p>
         </div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-          {trendingData.map((item) => (
-          <div 
-            key={item.id} 
-            className="group bg-white dark:bg-card-dark rounded-2xl border border-gray-200 dark:border-white/5 overflow-hidden hover:border-primary/50 transition-all duration-300 shadow-sm hover:shadow-glow cursor-pointer"
-            onClick={() => onCardClick(item.headline)}
-          >
-            <div className="relative h-48 overflow-hidden">
-              <img 
-                src={item.image} 
-                alt={item.headline} 
-                className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" 
-              />
-              <div className="absolute top-3 right-3 bg-card-dark/90 backdrop-blur border border-white/10 px-2.5 py-1 rounded-lg flex items-center gap-1.5 shadow-lg">
-                <span className={`size-2 rounded-full ${item.trustScore < 80 ? 'bg-yellow-500' : 'bg-primary'} ${item.trustScore >= 90 ? 'animate-pulse' : ''}`}></span>
-                <span className="text-xs font-bold text-white">{item.trustScore}% {item.trustScore < 80 ? 'Review' : 'Trust'}</span>
-              </div>
-            </div>
-            
-            <div className="p-5">
-              <div className="flex items-center gap-2 mb-3">
-                <div className={`size-5 rounded ${item.sourceColor} flex items-center justify-center text-white text-[10px] font-bold`}>{item.sourceInitial}</div>
-                <span className="text-xs font-semibold text-slate-500 dark:text-slate-400">{item.source}</span>
-                <span className="text-slate-300 dark:text-slate-600">•</span>
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+          {trendingData.map((item, index) => (
+            <button
+              key={item.id}
+              onClick={() => onCardClick(item.headline)}
+              className="group text-left bg-white dark:bg-card-dark rounded-2xl border border-gray-200 dark:border-white/5 p-4 hover:border-primary/40 hover:shadow-lg hover:shadow-primary/5 transition-all duration-200 flex flex-col justify-between min-h-[120px] relative overflow-hidden"
+            >
+              {/* Subtle gradient top */}
+              <div className="absolute top-0 left-0 right-0 h-0.5 bg-gradient-to-r from-primary/0 via-primary/30 to-primary/0 opacity-0 group-hover:opacity-100 transition-opacity" />
+              
+              {/* Source + meta */}
+              <div className="flex items-center gap-2 mb-2">
+                <span className={`size-5 rounded-full ${item.sourceColor} flex items-center justify-center text-white text-[9px] font-black shrink-0`}>
+                  {item.sourceInitial}
+                </span>
+                <span className="text-xs font-semibold text-slate-500 dark:text-slate-400 truncate">{item.source}</span>
+                <span className="text-slate-300 dark:text-slate-600 text-xs">·</span>
                 <span className="text-xs text-slate-400">{item.timeAgo}</span>
               </div>
-              
-              <h3 className="text-base font-bold text-slate-900 dark:text-white leading-snug mb-3 group-hover:text-primary transition-colors line-clamp-2">
+
+              {/* Headline */}
+              <h3 className="text-sm font-semibold text-slate-800 dark:text-slate-100 leading-snug group-hover:text-primary transition-colors line-clamp-3 flex-1">
                 {item.headline}
               </h3>
-              
-              <div className="flex gap-2">
-                <span className="px-2 py-1 rounded-md bg-slate-100 dark:bg-surface-dark text-slate-500 dark:text-slate-400 text-[10px] font-medium border border-gray-200 dark:border-white/5">
+
+              {/* Footer */}
+              <div className="flex items-center justify-between mt-3 pt-2 border-t border-gray-100 dark:border-white/5">
+                <span className="text-[10px] font-medium text-slate-400 px-2 py-0.5 rounded-full bg-slate-100 dark:bg-surface-dark">
                   {item.category}
                 </span>
+                <div className="flex items-center gap-1 text-xs font-medium text-slate-400 group-hover:text-primary transition-colors">
+                  <span className="material-symbols-outlined text-[14px]">fact_check</span>
+                  <span className="hidden group-hover:inline">Verify</span>
+                </div>
               </div>
-            </div>
-          </div>
+            </button>
           ))}
         </div>
       )}

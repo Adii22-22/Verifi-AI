@@ -16,11 +16,16 @@
 }
 
 @layer components {
-  /* Glass panel effect */
+  /* Glass panel — adapts to color mode */
   .glass-panel {
-    background: rgba(30, 41, 29, 0.7);
+    background: rgba(255, 255, 255, 0.85);
     backdrop-filter: blur(12px);
     -webkit-backdrop-filter: blur(12px);
+    border: 1px solid rgba(0, 0, 0, 0.06);
+  }
+
+  :is(.dark) .glass-panel {
+    background: rgba(30, 41, 29, 0.75);
     border: 1px solid rgba(255, 255, 255, 0.05);
   }
 

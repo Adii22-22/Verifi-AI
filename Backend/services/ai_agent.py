@@ -99,7 +99,7 @@ _ANALYSIS_SCHEMA = {
 }
 
 
-def analyze_credibility(article_text: str, _unused: str = "") -> Dict[str, Any]:
+def analyze_credibility(article_text: str) -> Dict[str, Any]:
     """
     Fast single-step pipeline:
       1. One DuckDuckGo search for the article/claim
@@ -265,7 +265,7 @@ _IMAGE_ANALYSIS_SCHEMA = {
 }
 
 
-def analyze_image(image_bytes: bytes, mime_type: str = "image/jpeg") -> Dict[str, Any]:
+def analyze_image(image_b64: str, mime_type: str = "image/jpeg") -> Dict[str, Any]:
     """
     Analyze a news image/screenshot using Gemini Vision.
     Extracts text, detects manipulation, and fact-checks claims.
@@ -277,7 +277,7 @@ def analyze_image(image_bytes: bytes, mime_type: str = "image/jpeg") -> Dict[str
         model=GEMINI_MODEL_NAME,
         contents=[
             {"text": "Extract ALL text visible in this image. Return only the extracted text, nothing else."},
-            {"inline_data": {"mime_type": mime_type, "data": image_bytes}},
+            {"inline_data": {"mime_type": mime_type, "data": image_b64}},
         ],
     )
     extracted_text = getattr(extract_response, "text", "") or ""
@@ -321,7 +321,7 @@ Be especially vigilant about propaganda, out-of-context images, and misleading i
         model=GEMINI_MODEL_NAME,
         contents=[
             {"text": prompt},
-            {"inline_data": {"mime_type": mime_type, "data": image_bytes}},
+            {"inline_data": {"mime_type": mime_type, "data": image_b64}},
         ],
         config=config,
     )

@@ -1,28 +1,86 @@
-Verifi.ai � ML Training Report
-========================================
-Dataset: 4000 samples (50% fake, 50% real)
-Train/Test Split: 80/20
-Vectorizer: TF-IDF (max_features=5000, ngram_range=(1,2))
-Model: SGDClassifier (loss=modified_huber)
 
-Results:
-  Accuracy:  1.0000 (100.0%)
-  Precision: 1.0000
-  Recall:    1.0000
-  F1 Score:  1.0000
+╔══════════════════════════════════════════════════════════════╗
+║          VERIFI.AI — ML MODEL TRAINING REPORT               ║
+╚══════════════════════════════════════════════════════════════╝
 
-Confusion Matrix:
-              Predicted
-              FAKE  REAL
-  Actual FAKE   400     0
-  Actual REAL     0   400
+DATASET INFORMATION
+═══════════════════
+  Source:             Real fake news dataset (from academic research)
+  Total Samples:      6,334
+  Real News:          3,171 (50.1%)
+  Fake News:          3,163 (49.9%)
+  Train/Test Split:   80% / 20% (stratified)
 
+FEATURE ENGINEERING
+═══════════════════
+  Method:             TF-IDF Vectorization
+  Max Features:       10,000
+  N-gram Range:       (1, 2) — Unigrams + Bigrams
+  Stop Words:         English
+  Min Doc Frequency:  3
+  Max Doc Frequency:  95%
+  Sublinear TF:       Yes (log normalization)
+
+MODELS COMPARED
+═══════════════
+
+  SGD Classifier ★ BEST
+  ├─ Accuracy:     0.9408 (94.1%)
+  ├─ Precision:    0.9415
+  ├─ Recall:       0.9401
+  ├─ F1 Score:     0.9408
+  └─ CV F1 (5x):   0.9398 ± 0.0083
+
+  Multinomial NB
+  ├─ Accuracy:     0.9045 (90.4%)
+  ├─ Precision:    0.9254
+  ├─ Recall:       0.8801
+  ├─ F1 Score:     0.9022
+  └─ CV F1 (5x):   0.9050 ± 0.0067
+
+  Logistic Regression
+  ├─ Accuracy:     0.9298 (93.0%)
+  ├─ Precision:    0.9374
+  ├─ Recall:       0.9211
+  ├─ F1 Score:     0.9292
+  └─ CV F1 (5x):   0.9258 ± 0.0049
+
+BEST MODEL: SGD Classifier
+═══════════════════════
               precision    recall  f1-score   support
 
-        FAKE       1.00      1.00      1.00       400
-        REAL       1.00      1.00      1.00       400
+        FAKE       0.94      0.94      0.94       633
+        REAL       0.94      0.94      0.94       634
 
-    accuracy                           1.00       800
-   macro avg       1.00      1.00      1.00       800
-weighted avg       1.00      1.00      1.00       800
+    accuracy                           0.94      1267
+   macro avg       0.94      0.94      0.94      1267
+weighted avg       0.94      0.94      0.94      1267
 
+
+CONFUSION MATRIX
+════════════════
+                Predicted
+                FAKE    REAL
+  Actual FAKE     596      37
+  Actual REAL      38     596
+
+  True Positives:  596  (correctly identified REAL news)
+  True Negatives:  596  (correctly identified FAKE news)
+  False Positives: 37  (FAKE news wrongly labeled REAL)
+  False Negatives: 38  (REAL news wrongly labeled FAKE)
+
+GENERATED ARTIFACTS
+═══════════════════
+  Model files:
+    • tfidf_vectorizer.pkl      — TF-IDF vocabulary & weights
+    • sgd_classifier.pkl        — Trained SGD classifier
+
+  Plots:
+    • 01_class_distribution.png — Dataset class balance
+    • 02_text_length_distribution.png — Text length analysis
+    • 03_word_clouds.png        — Most common words (Fake vs Real)
+    • 04_model_comparison.png   — Multi-model metric comparison
+    • 05_confusion_matrix.png   — Confusion matrix (counts + normalized)
+    • 06_roc_pr_curves.png      — ROC curve + Precision-Recall curve
+    • 07_learning_curve.png     — Bias/Variance analysis
+    • 08_feature_importance.png — Top predictive words

@@ -1,114 +1,170 @@
-# News Credibility — Full Stack AI App
+# Verifi.ai — AI-Powered News Credibility Platform
 
-A full‑stack application that evaluates the credibility of news articles using AI. This repository contains both frontend and backend code, along with setup and change logs to run and extend the project locally or deploy it.
+A full-stack news credibility analysis platform that uses a **hybrid ML architecture**: a local TF-IDF + SGD classifier blended with Google Gemini's LLM analysis to produce explainable, academically defensible trust scores.
 
+## Tech Stack
 
----
-
-## Table of contents
-- [About](#about)
-- [Features](#features)
-- [Architecture](#architecture)
-- [Prerequisites](#prerequisites)
-- [Quick start — Run locally](#quick-start---run-locally)
-- [Environment variables](#environment-variables)
-- [Development workflow](#development-workflow)
-- [Testing](#testing)
-- [Deployment](#deployment)
-- [Changelog & setup details](#changelog--setup-details)
-- [Contributing](#contributing)
-- [License](#license)
-- [Contact](#contact)
-
----
-
-## About
-This project analyses news articles and returns a credibility assessment using AI models. It’s designed as a full‑stack example combining a frontend UI with a backend AI service, and includes setup documentation and change history.
-
-## Features
-- Submit article text or URL for credibility assessment
-- AI-powered scoring and explanation of credibility signals
-- Frontend UI for entering and viewing results
-- Backend API for model inference and business logic
-- Ready-to-run local setup and deployment guidance
+| Layer | Technology |
+|---|---|
+| **Frontend** | React 18 + TypeScript + Vite |
+| **Backend** | Python 3.11 + FastAPI + Uvicorn |
+| **Database** | PostgreSQL + SQLAlchemy + Alembic |
+| **ML Model** | scikit-learn (TF-IDF + SGDClassifier) |
+| **AI/LLM** | Google Gemini 2.5 Flash |
+| **Extension** | Chrome Extension (Manifest V3) |
+| **Auth** | JWT (python-jose + passlib/bcrypt) |
 
 ## Architecture
-- Frontend: located in the `Frontend/` directory (React/Next.js or similar)
-- Backend: located in the `Backend/` directory (Node/Express or similar)
-- Root contains supporting docs: `SETUP.md`, `CHANGES.md`, and metadata
 
-(See the repository tree for exact implementation details in the `Frontend/` and `Backend/` folders.)
+```
+┌─────────────────────────────────────────────────────────────┐
+│                      FRONTEND (Vite + React)                │
+│  Home │ History │ Compare │ Leaderboard │ Extension Page    │
+│                      apiService.ts                          │
+└───────────────────────┬─────────────────────────────────────┘
+                        │ REST API (JWT auth)
+┌───────────────────────▼─────────────────────────────────────┐
+│                      BACKEND (FastAPI)                      │
+│                                                             │
+│  /analyze ──► Gemini AI ─────────┐                         │
+│            ──► ML Scorer ────────┤  Ensemble Blending       │
+│            ──► Source Reputation ┘  (0.70 + 0.20 + 0.10)   │
+│                                                             │
+│  /history  ──► PostgreSQL (CRUD + 30-day auto-delete)      │
+│  /compare  ──► Gemini AI (side-by-side claim comparison)   │
+│  /leaderboard ► Aggregated stats from all analyses         │
+│  /news     ──► Live RSS feeds                              │
+└─────────────────────────────────────────────────────────────┘
 
-## Prerequisites
-- Node.js (version 18+ recommended)
-- npm (or yarn)
-- An API key for the AI model provider (this repository originally referenced GEMINI_API_KEY)
+┌─────────────────────────────────────────────────────────────┐
+│                CHROME EXTENSION (Manifest V3)               │
+│  Floating panel on any webpage                              │
+│  Reads JWT from chrome.storage.local for auth               │
+│  Sends text/image to /analyze with Bearer token             │
+└─────────────────────────────────────────────────────────────┘
+```
 
-## Quick start — Run locally
-1. Clone the repository:
-   - git clone https://github.com/Adii22-22/news-credibility-ai-full-stack.git
-   - cd news-credibility-ai-full-stack
-2. Install dependencies (root or per-service, depending on structure):
-   - npm install
-   - cd Frontend && npm install
-   - cd ../Backend && npm install
-3. Configure environment variables (see next section).
-4. Start the services:
-   - From the root or each directory:
-     - npm run dev
-     - or for production builds: npm run build && npm run start
+## Quick Start
 
-Notes:
-- The repository includes a top-level README with a quick run guide and references; for more detailed installation and environment setup consult `SETUP.md`.
+### Prerequisites
+- Python 3.11+
+- Node.js 18+
+- PostgreSQL running locally
+- Google Gemini API key
 
-## Environment variables
-Create .env or .env.local in the appropriate folder(s) and add the required keys. Example (as referenced in the previous README):
+### 1. Backend
+```bash
+cd Backend
 
-- GEMINI_API_KEY=<your-gemini-or-AI-provider-api-key>
-- NODE_ENV=development
-- PORT=3000
-- (Other keys may be required by the backend or frontend — check `Backend/` and `Frontend/` code or `SETUP.md` for a complete list.)
+# Create .env file
+# GEMINI_API_KEY=your_key_here
+# GEMINI_MODEL_NAME=gemini-2.5-flash
+# DATABASE_URL=postgresql://postgres:password@localhost:5432/verifi_ai
+# JWT_SECRET=your_secret_key
+# JWT_ALGORITHM=HS256
+# JWT_EXPIRE_MINUTES=10080
 
-Keep secrets out of version control.
+pip install -r requirements.txt
 
-## Development workflow
-- Work on feature branches and open pull requests for changes.
-- Update `CHANGES.md` for notable modifications.
-- Run linters and tests locally before pushing.
-- Use the `Frontend/` directory for UI changes and `Backend/` for API/model changes.
+# Train the ML model (downloads dataset + generates plots)
+python -m services.train_model
 
-## Testing
-- Unit and integration tests (if present) will be in the respective service directories.
-- Run tests with:
-  - npm test
-  - or cd Frontend && npm test; cd ../Backend && npm test
+# Start the server
+uvicorn src.api:app --reload
+# Backend runs at http://localhost:8000
+```
 
-If the repository does not yet include test suites, consider adding them (Jest, React Testing Library, or other framework appropriate to the stack).
+### 2. Frontend
+```bash
+cd Frontend
+npm install
+npm run dev
+# Frontend runs at http://localhost:5173
+```
 
-## Deployment
-- Follow your hosting provider's instructions (Vercel, Netlify for frontend; Heroku, AWS, GCP, or a container-based platform for backend).
-- Ensure environment variables (API keys, DB URLs) are set in the hosting environment.
-- For CI/CD, add workflows to build and test both frontend and backend before deployment.
+### 3. Chrome Extension (Optional)
+1. Open `chrome://extensions/` in Chrome
+2. Enable "Developer mode"
+3. Click "Load unpacked" → select the `Extension/` folder
+4. The Verifi.ai panel appears on any webpage
 
-## Changelog & Setup details
-- See `CHANGES.md` for the project changelog.
-- See `SETUP.md` for expanded setup instructions and platform-specific notes.
+## ML Model Details
 
-## Contributing
-Contributions are welcome. Suggested process:
-1. Fork the repository
-2. Create a feature branch: `git checkout -b feature/your-feature`
-3. Commit changes and push to your fork
-4. Open a pull request describing your changes
-5. Keep PRs small and focused, include tests where applicable
+The local ML classifier is trained on the **George McIntire Fake News Corpus** (6,335 real articles from academic research).
 
-Please follow the code style and update docs when changing functionality.
+**Pipeline:** `Raw Text → TF-IDF Vectorizer (10K features, bigrams) → SGD Classifier`
 
-## License
-Add or confirm the project license (LICENSE file) — if none exists, add one that fits your needs (e.g., MIT, Apache-2.0).
+**Training produces:**
+- `ml_artifacts/tfidf_vectorizer.pkl` — vocabulary & weights
+- `ml_artifacts/sgd_classifier.pkl` — trained classifier
+- `ml_artifacts/plots/` — 8 evaluation plots (confusion matrix, ROC curve, learning curve, etc.)
+- `ml_artifacts/training_report.txt` — full metrics report
 
-## Contact
-Repository: https://github.com/Adii22-22/news-credibility-ai-full-stack  
-If you have questions, open an issue in this repository.
+**Ensemble formula:** `Trust Score = (Gemini × 0.70) + (ML × 0.20) + (Source × 0.10)`
 
----
+## API Endpoints
+
+| Method | Endpoint | Auth | Description |
+|---|---|---|---|
+| POST | `/analyze` | Optional | Analyze text/URL for credibility |
+| POST | `/analyze-image` | Optional | Analyze image for manipulation |
+| POST | `/compare` | No | Compare two claims side-by-side |
+| POST | `/register` | No | Create new user account |
+| POST | `/login` | No | Login and get JWT token |
+| GET | `/me` | Yes | Get current user profile |
+| GET | `/history` | Yes | Get user's analysis history |
+| DELETE | `/history/{id}` | Yes | Delete a history item |
+| GET | `/leaderboard` | No | Platform-wide analysis stats |
+| GET | `/news` | No | Live trending news feed |
+| GET | `/health` | No | Health check |
+
+## Project Structure
+
+```
+project2/
+├── Backend/
+│   ├── src/
+│   │   └── api.py              # FastAPI app, all endpoints
+│   ├── services/
+│   │   ├── ai_agent.py         # Gemini AI integration
+│   │   ├── ml_scorer.py        # Local ML model scorer
+│   │   ├── train_model.py      # ML training pipeline
+│   │   ├── source_reputation.py # Source credibility scoring
+│   │   ├── scraper.py          # URL article text extraction
+│   │   ├── search.py           # Web search for verification
+│   │   ├── news_feed.py        # RSS news feed fetcher
+│   │   ├── database.py         # SQLAlchemy DB setup
+│   │   ├── models.py           # DB models (User, Analysis)
+│   │   ├── auth.py             # JWT auth utilities
+│   │   └── ml_artifacts/       # Trained model files + plots
+│   ├── requirements.txt
+│   └── .env
+├── Frontend/
+│   ├── src/
+│   │   ├── components/         # Navbar, Dashboard, HeroSection, AuthModal, TrendingSection
+│   │   ├── pages/              # HistoryPage, ComparePage, LeaderboardPage, ExtensionPage
+│   │   └── services/           # apiService.ts
+│   ├── types.ts
+│   └── package.json
+├── Extension/
+│   ├── manifest.json           # Chrome MV3 manifest
+│   ├── content.js              # Content script (floating panel)
+│   ├── content.css             # Panel styles
+│   ├── popup.html              # Extension popup
+│   └── popup.js                # Popup logic
+└── README.md
+```
+
+## Key Features
+- **Hybrid ML Scoring** — Local TF-IDF + SGD model blended with Gemini LLM
+- **Real-time News Analysis** — Text, URL, or image input
+- **Cross-reference Verification** — Automated web search for corroborating sources
+- **Source Reputation Scoring** — Known news source credibility database
+- **Analysis History** — Saved per-user with search and delete
+- **30-day Auto-cleanup** — Old analyses purged on server startup
+- **Chrome Extension** — Analyze any webpage with a floating panel
+- **Multi-language Summaries** — English, Hindi, Marathi
+- **Claim Comparison** — Side-by-side credibility comparison
+
+## Repository
+https://github.com/Adii22-22/news-credibility-ai-full-stack

@@ -167,4 +167,4 @@ project2/
 - **Claim Comparison** — Side-by-side credibility comparison
 
 ## Repository
-https://github.com/Adii22-22/news-credibility-ai-full-stack
+https://github.com/Adii22-22/Verifi-AI

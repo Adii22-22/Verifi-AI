@@ -52,6 +52,13 @@ def _generate(client: genai.Client, prompt: str, schema: dict | None = None) -> 
                 raise
 
 
+def generate_search_query(text: str) -> str:
+    """Uses a fast Gemini call to extract a 3-6 word news search query from a long text."""
+    client = _get_client()
+    prompt = f"Extract a 3 to 6 word news search query (keywords only) that best captures the main event or entity in this text. Output ONLY the keywords:\n\n{text[:1500]}"
+    return _generate(client, prompt)
+
+
 _ANALYSIS_SCHEMA = {
     "type": "object",
     "properties": {
@@ -99,7 +106,7 @@ _ANALYSIS_SCHEMA = {
 }
 
 
-def analyze_credibility(article_text: str) -> Dict[str, Any]:
+def analyze_credibility(article_text: str, search_query: str = None) -> Dict[str, Any]:
     """
     Fast single-step pipeline:
       1. One DuckDuckGo search for the article/claim
@@ -108,7 +115,8 @@ def analyze_credibility(article_text: str) -> Dict[str, Any]:
     client = _get_client()
 
     # Single search — use 4 results for speed (not 6)
-    evidence = get_verification_context(article_text[:150], max_results=4)
+    query = search_query if search_query else article_text[:150]
+    evidence = get_verification_context(query, max_results=4)
     if not evidence or evidence == "NO_EVIDENCE_FOUND":
         evidence = "No external evidence retrieved."
 

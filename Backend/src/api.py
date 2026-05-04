@@ -18,9 +18,9 @@ from sqlalchemy import func, desc
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from services.scraper import scrape_article_text
+from services.scraper import scrape_article_text, scrape_article_data
 from services.search import get_verification_context
-from services.ai_agent import analyze_credibility, compare_claims, analyze_image
+from services.ai_agent import analyze_credibility, compare_claims, analyze_image, generate_search_query
 from services.news_feed import fetch_top_news
 from services.source_reputation import get_source_reputation, blend_scores
 from services.database import get_db, init_db, SessionLocal
@@ -246,14 +246,20 @@ def analyze_news(
         is_url = user_input.startswith(("http://", "https://"))
 
         if is_url:
-            article_text = scrape_article_text(user_input)
-            if article_text.startswith("ERROR"):
-                raise HTTPException(status_code=400, detail=article_text)
+            scraped = scrape_article_data(user_input)
+            if "error" in scraped:
+                raise HTTPException(status_code=400, detail=scraped["error"])
+            article_text = scraped["text"]
+            search_query = scraped["title"] or user_input
         else:
             article_text = f"User Claim: {user_input}"
+            if len(user_input) > 200:
+                search_query = generate_search_query(user_input)
+            else:
+                search_query = user_input
 
         # AI analysis (3-step pipeline)
-        result = analyze_credibility(article_text)
+        result = analyze_credibility(article_text, search_query=search_query)
 
         # ── Local ML Model scoring (runs in ~0.001s) ──
         ml_result = get_ml_score(user_input)

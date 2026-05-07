@@ -270,12 +270,12 @@ def analyze_news(
         result["sourceReputation"] = reputation
 
         # ── Ensemble Blending Formula ──
-        # Final = (Gemini * 0.70) + (ML * 0.20) + (Source * 0.10)
-        gemini_score = result["trustScore"]
+        # Final = (AI * 0.70) + (ML * 0.20) + (Source * 0.10)
+        ai_score = result["trustScore"]
         ml_score = ml_result["ml_score"]
-        source_score = reputation["score"] if reputation["score"] != -1 else gemini_score
+        source_score = reputation["score"] if reputation["score"] != -1 else ai_score
         blended = int(round(
-            (gemini_score * 0.70) + (ml_score * 0.20) + (source_score * 0.10)
+            (ai_score * 0.70) + (ml_score * 0.20) + (source_score * 0.10)
         ))
         result["trustScore"] = max(0, min(100, blended))
 

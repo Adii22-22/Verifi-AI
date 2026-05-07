@@ -515,7 +515,7 @@ function verifiSetup(root) {
     }
 
     /* CTA */
-    h.push('<a href="http://localhost:3000" target="_blank" class="vf-cta">');
+    h.push('<a href="http://localhost:5173" target="_blank" class="vf-cta">');
     h.push(ICO.grid + ' Open Dashboard ' + ICO.arrow + '</a>');
 
     panel.classList.remove("vf-panel-hidden");

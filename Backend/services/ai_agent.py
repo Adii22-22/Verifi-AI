@@ -12,17 +12,30 @@ load_dotenv()
 
 logger = logging.getLogger(__name__)
 GEMINI_MODEL_NAME = os.getenv("GEMINI_MODEL_NAME", "gemini-2.5-flash")
+GROQ_MODEL_NAME = os.getenv("GROQ_MODEL_NAME", "llama-3.3-70b-versatile")
 
+# ─── Provider Clients ─────────────────────────────────────────────────────────
 
-def _get_client() -> genai.Client:
+def _get_gemini_client() -> genai.Client:
     api_key = os.getenv("GEMINI_API_KEY")
     if not api_key:
         raise Exception("GEMINI_API_KEY is not set.")
     return genai.Client(api_key=api_key)
 
 
-def _generate(client: genai.Client, prompt: str, schema: dict | None = None) -> str:
-    """Single Gemini call with automatic 429 retry."""
+def _get_groq_client():
+    """Returns a simple dict with the API key for Groq REST calls."""
+    api_key = os.getenv("GROQ_API_KEY")
+    if not api_key:
+        return None
+    return {"api_key": api_key}
+
+
+# ─── Gemini Generation ────────────────────────────────────────────────────────
+
+def _generate_gemini(prompt: str, schema: dict | None = None) -> str:
+    """Single Gemini call with automatic 429/503 retry."""
+    client = _get_gemini_client()
     config = {"response_mime_type": "application/json", "response_schema": schema} if schema else {}
     for attempt in range(3):
         try:
@@ -41,22 +54,124 @@ def _generate(client: genai.Client, prompt: str, schema: dict | None = None) -> 
             return cleaned.strip()
         except Exception as e:
             err = str(e)
-            if "429" in err or "RESOURCE_EXHAUSTED" in err:
-                wait = (attempt + 1) * 15
-                logger.warning(f"Rate limit hit. Retrying in {wait}s...")
+            if "429" in err or "RESOURCE_EXHAUSTED" in err or "503" in err or "UNAVAILABLE" in err:
+                wait = (attempt + 1) * 10
+                logger.warning(f"Gemini hit {err[:80]}. Retrying in {wait}s (attempt {attempt+1}/3)...")
                 if attempt < 2:
                     time.sleep(wait)
                 else:
-                    raise Exception("Gemini rate limit. Wait a minute and retry.")
+                    raise Exception(f"Gemini unavailable after 3 attempts: {err[:120]}")
             else:
                 raise
 
 
+# ─── Groq Generation (REST API) ──────────────────────────────────────────────
+
+def _generate_groq(prompt: str, schema: dict | None = None) -> str:
+    """Single Groq call via REST API. Fast fallback for when Gemini is down."""
+    import requests
+
+    groq_info = _get_groq_client()
+    if not groq_info:
+        raise Exception("GROQ_API_KEY not configured")
+
+    system_msg = "You are a JSON-only AI assistant. Always respond with valid JSON, no markdown fences, no extra text."
+    if schema:
+        system_msg += f"\n\nYour response MUST conform to this JSON schema:\n{json.dumps(schema, indent=2)}"
+
+    headers = {
+        "Authorization": f"Bearer {groq_info['api_key']}",
+        "Content-Type": "application/json",
+    }
+    payload = {
+        "model": GROQ_MODEL_NAME,
+        "messages": [
+            {"role": "system", "content": system_msg},
+            {"role": "user", "content": prompt},
+        ],
+        "temperature": 0.3,
+        "max_tokens": 4096,
+        "response_format": {"type": "json_object"},
+    }
+
+    for attempt in range(2):
+        try:
+            resp = requests.post(
+                "https://api.groq.com/openai/v1/chat/completions",
+                headers=headers,
+                json=payload,
+                timeout=60,
+            )
+            if resp.status_code == 429:
+                wait = (attempt + 1) * 5
+                logger.warning(f"Groq rate limit. Retrying in {wait}s...")
+                time.sleep(wait)
+                continue
+            resp.raise_for_status()
+            data = resp.json()
+            text = data["choices"][0]["message"]["content"]
+            cleaned = text.strip()
+            for marker in ["```json", "```"]:
+                if cleaned.startswith(marker):
+                    cleaned = cleaned[len(marker):]
+            if cleaned.endswith("```"):
+                cleaned = cleaned[:-3]
+            return cleaned.strip()
+        except Exception as e:
+            if attempt < 1:
+                time.sleep(3)
+            else:
+                raise Exception(f"Groq failed: {str(e)[:200]}")
+    raise Exception("Groq failed after retries")
+
+
+# ─── Racing Generator (first response wins) ──────────────────────────────────
+
+def _generate(prompt: str, schema: dict | None = None) -> str:
+    """
+    Race Gemini vs Groq concurrently. Whichever responds first wins.
+    If one provider is not configured, falls back to the other.
+    """
+    has_gemini = bool(os.getenv("GEMINI_API_KEY"))
+    has_groq = bool(os.getenv("GROQ_API_KEY"))
+
+    # Only one provider available
+    if has_gemini and not has_groq:
+        return _generate_gemini(prompt, schema)
+    if has_groq and not has_gemini:
+        return _generate_groq(prompt, schema)
+    if not has_gemini and not has_groq:
+        raise Exception("No AI API keys configured. Set GEMINI_API_KEY or GROQ_API_KEY in .env")
+
+    # Both available — RACE them
+    errors = []
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        futures = {
+            pool.submit(_generate_gemini, prompt, schema): "Gemini",
+            pool.submit(_generate_groq, prompt, schema): "Groq",
+        }
+        for future in as_completed(futures):
+            provider = futures[future]
+            try:
+                result = future.result()
+                if result and result.strip():
+                    logger.info(f"AI response won by: {provider}")
+                    # Cancel the other future (best-effort)
+                    for f in futures:
+                        if f != future:
+                            f.cancel()
+                    return result
+            except Exception as e:
+                logger.warning(f"{provider} failed: {str(e)[:100]}")
+                errors.append(f"{provider}: {str(e)[:150]}")
+
+    raise Exception(f"All AI providers failed: {'; '.join(errors)}")
+
+
 def generate_search_query(text: str) -> str:
-    """Uses a fast Gemini call to extract a 3-6 word news search query from a long text."""
-    client = _get_client()
+    """Uses a fast AI call to extract a 3-6 word news search query from a long text."""
     prompt = f"Extract a 3 to 6 word news search query (keywords only) that best captures the main event or entity in this text. Output ONLY the keywords:\n\n{text[:1500]}"
-    return _generate(client, prompt)
+    return _generate(prompt)
 
 
 _ANALYSIS_SCHEMA = {
@@ -110,10 +225,8 @@ def analyze_credibility(article_text: str, search_query: str = None) -> Dict[str
     """
     Fast single-step pipeline:
       1. One DuckDuckGo search for the article/claim
-      2. One Gemini call that extracts claims, verifies, and synthesizes verdict
+      2. One AI call (Gemini racing Groq) that extracts claims, verifies, and synthesizes verdict
     """
-    client = _get_client()
-
     # Single search — use 4 results for speed (not 6)
     query = search_query if search_query else article_text[:150]
     evidence = get_verification_context(query, max_results=4)
@@ -150,7 +263,7 @@ IMPORTANT: For cross-references, use the actual URLs from the LINK fields in the
 
 Be objective, evidence-based, and concise."""
 
-    raw = _generate(client, prompt, schema=_ANALYSIS_SCHEMA)
+    raw = _generate(prompt, schema=_ANALYSIS_SCHEMA)
 
     try:
         result = json.loads(raw)
@@ -173,9 +286,7 @@ Be objective, evidence-based, and concise."""
 
 
 def compare_claims(claim_a: str, claim_b: str) -> Dict[str, Any]:
-    """Compare two claims — single Gemini call."""
-    client = _get_client()
-
+    """Compare two claims — single AI call with racing providers."""
     # Run BOTH searches in parallel — cuts search time in HALF
     with ThreadPoolExecutor(max_workers=2) as pool:
         future_a = pool.submit(get_verification_context, claim_a, 3)
@@ -212,7 +323,7 @@ EVIDENCE FOR CLAIM B:
 
 Provide credibility scores, verdicts, and a 3-sentence reasoning."""
 
-    raw = _generate(client, prompt, schema=schema)
+    raw = _generate(prompt, schema=schema)
     try:
         return json.loads(raw)
     except json.JSONDecodeError as e:
@@ -276,29 +387,30 @@ _IMAGE_ANALYSIS_SCHEMA = {
 def analyze_image(image_b64: str, mime_type: str = "image/jpeg") -> Dict[str, Any]:
     """
     Analyze a news image/screenshot using Gemini Vision.
-    Extracts text, detects manipulation, and fact-checks claims.
+    Image analysis ALWAYS uses Gemini (Groq doesn't support vision).
+    Falls back to text-only analysis via Groq if Gemini is unavailable.
     """
-    client = _get_client()
+    client = _get_gemini_client()
 
-    # First: extract text from image with Gemini Vision
-    extract_response = client.models.generate_content(
-        model=GEMINI_MODEL_NAME,
-        contents=[
-            {"text": "Extract ALL text visible in this image. Return only the extracted text, nothing else."},
-            {"inline_data": {"mime_type": mime_type, "data": image_b64}},
-        ],
-    )
-    extracted_text = getattr(extract_response, "text", "") or ""
+    try:
+        # First: extract text from image with Gemini Vision
+        extract_response = client.models.generate_content(
+            model=GEMINI_MODEL_NAME,
+            contents=[
+                {"text": "Extract ALL text visible in this image. Return only the extracted text, nothing else."},
+                {"inline_data": {"mime_type": mime_type, "data": image_b64}},
+            ],
+        )
+        extracted_text = getattr(extract_response, "text", "") or ""
 
-    # Search for evidence CONCURRENTLY while we have the extracted text
-    # Use first 150 chars of extracted text for faster search
-    search_text = extracted_text[:150] if extracted_text.strip() else "news image analysis"
-    evidence = get_verification_context(search_text, max_results=4)
-    if not evidence or evidence == "NO_EVIDENCE_FOUND":
-        evidence = "No external evidence retrieved."
+        # Search for evidence CONCURRENTLY while we have the extracted text
+        search_text = extracted_text[:150] if extracted_text.strip() else "news image analysis"
+        evidence = get_verification_context(search_text, max_results=4)
+        if not evidence or evidence == "NO_EVIDENCE_FOUND":
+            evidence = "No external evidence retrieved."
 
-    # Full analysis with image + extracted text + evidence
-    prompt = f"""You are an expert AI Image and News Analyst specializing in detecting misinformation, image manipulation, and propaganda in visual media.
+        # Full analysis with image + extracted text + evidence
+        prompt = f"""You are an expert AI Image and News Analyst specializing in detecting misinformation, image manipulation, and propaganda in visual media.
 
 TASK: Analyze this image for credibility. The image appears to be a news-related image (screenshot, social media post, infographic, meme, etc.).
 
@@ -323,18 +435,38 @@ INSTRUCTIONS:
 IMPORTANT: For cross-references, use actual URLs from the evidence LINK fields. Do NOT fabricate URLs.
 Be especially vigilant about propaganda, out-of-context images, and misleading infographics."""
 
-    # Use vision API with image + text prompt
-    config = {"response_mime_type": "application/json", "response_schema": _IMAGE_ANALYSIS_SCHEMA}
-    response = client.models.generate_content(
-        model=GEMINI_MODEL_NAME,
-        contents=[
-            {"text": prompt},
-            {"inline_data": {"mime_type": mime_type, "data": image_b64}},
-        ],
-        config=config,
-    )
+        # Use vision API with image + text prompt
+        config = {"response_mime_type": "application/json", "response_schema": _IMAGE_ANALYSIS_SCHEMA}
+        response = client.models.generate_content(
+            model=GEMINI_MODEL_NAME,
+            contents=[
+                {"text": prompt},
+                {"inline_data": {"mime_type": mime_type, "data": image_b64}},
+            ],
+            config=config,
+        )
 
-    raw = getattr(response, "text", "") or ""
+        raw = getattr(response, "text", "") or ""
+
+    except Exception as e:
+        err = str(e)
+        logger.warning(f"Gemini Vision failed ({err[:80]}), falling back to text-only analysis via racing providers...")
+        # Fallback: use text-only analysis with a generic prompt
+        evidence = get_verification_context("news image analysis", max_results=4)
+        if not evidence or evidence == "NO_EVIDENCE_FOUND":
+            evidence = "No external evidence retrieved."
+
+        fallback_prompt = f"""You are an AI image analyst. An image was uploaded but vision processing failed.
+Based on the context, provide a credibility analysis.
+
+--- VERIFICATION EVIDENCE ---
+{evidence[:3000]}
+
+Provide a balanced analysis noting that the image could not be directly analyzed.
+Set is_manipulated to false, extracted_text to "Image could not be processed", and content_type to "other"."""
+
+        raw = _generate(fallback_prompt, schema=_IMAGE_ANALYSIS_SCHEMA)
+
     cleaned = raw.strip()
     for marker in ["```json", "```"]:
         if cleaned.startswith(marker):

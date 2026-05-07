@@ -37,7 +37,9 @@ const HeroSection: React.FC<HeroSectionProps> = ({ onAnalyze, onAnalyzeImage, is
     const ta = textareaRef.current;
     if (ta) {
       ta.style.height = 'auto';
-      ta.style.height = Math.min(ta.scrollHeight, 200) + 'px';
+      const newHeight = Math.min(ta.scrollHeight, 180);
+      ta.style.height = newHeight + 'px';
+      ta.style.overflowY = ta.scrollHeight > 180 ? 'auto' : 'hidden';
     }
   }, [inputValue]);
 
@@ -141,22 +143,22 @@ const HeroSection: React.FC<HeroSectionProps> = ({ onAnalyze, onAnalyzeImage, is
           </div>
         ) : (
           /* Text input — auto-expanding textarea */
-          <div className={`relative flex items-end bg-white dark:bg-card-dark rounded-2xl shadow-lg dark:shadow-none border transition-all min-h-[4rem] px-2 py-2 focus-within:ring-2 focus-within:ring-primary/50 focus-within:border-primary ${
+          <div className={`relative flex items-center bg-white dark:bg-card-dark rounded-[1.5rem] shadow-lg dark:shadow-none border transition-all min-h-[4rem] px-2 focus-within:ring-2 focus-within:ring-primary/50 focus-within:border-primary ${
             dragActive ? 'border-primary ring-2 ring-primary/50 border-dashed' : 'border-gray-200 dark:border-white/10'
           }`}>
-            <div className="pl-4 pr-2 pb-2 text-slate-400 dark:text-slate-500 self-start pt-3">
+            <div className="pl-4 pr-2 text-slate-400 dark:text-slate-500 flex-shrink-0">
               <span className="material-symbols-outlined text-[28px]">link</span>
             </div>
             <textarea
               ref={textareaRef}
-              className="flex-1 bg-transparent border-none outline-none text-base md:text-lg text-slate-800 dark:text-white placeholder:text-slate-400 dark:placeholder:text-slate-500 w-full focus:ring-0 resize-none py-3 leading-relaxed"
+              className="flex-1 bg-transparent border-none outline-none text-base md:text-lg text-slate-800 dark:text-white placeholder:text-slate-400 dark:placeholder:text-slate-500 w-full focus:ring-0 resize-none py-4 leading-normal"
               placeholder={dragActive ? "Drop image here..." : "Paste URL, headline, claim, or drop an image..."}
               value={inputValue}
               onChange={(e) => setInputValue(e.target.value)}
               onKeyDown={handleKeyDown}
               onPaste={handlePaste}
               rows={1}
-              style={{ maxHeight: '200px', overflowY: inputValue.split('\n').length > 5 ? 'auto' : 'hidden' }}
+              style={{ maxHeight: '180px', overflowY: 'hidden' }}
             />
             {/* Image upload button */}
             <div className="flex items-center gap-1 pb-1 shrink-0">

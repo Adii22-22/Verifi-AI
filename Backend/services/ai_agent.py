@@ -106,11 +106,11 @@ def analyze_credibility(article_text: str, search_query: str = None) -> Dict[str
 - "headline": one-line finding summary
 - "headline_hi": Hindi translation of headline
 - "headline_mr": Marathi translation of headline
-- "summary": 2-3 sentence analysis
+- "summary": 2-3 sentence analysis. IMPORTANT: If the claim is FALSE or MISLEADING, you MUST state what the correct/actual fact is. For example: "This claim is false. In reality, [correct fact based on evidence]." Always provide the corrected version so the user learns the truth.
 - "summary_hi": Hindi translation of summary
 - "summary_mr": Marathi translation of summary
 - "tags": array of exactly 3 topic tags
-- "claimVerdict": array of up to 3 objects, each with "claim", "claim_hi", "claim_mr", "verdict" (Verified/False/Unverified/Misleading), "reason", "reason_hi", "reason_mr"
+- "claimVerdict": array of up to 3 objects, each with "claim", "claim_hi", "claim_mr", "verdict" (Verified/False/Unverified/Misleading), "reason" (if verdict is False or Misleading, MUST include the corrected fact here), "reason_hi", "reason_mr"
 - "crossReferences": array of up to 3 objects with "source", "sourceInitials", "timeAgo", "trustColor" (primary/yellow/red/gray), "url"
 
 ARTICLE/CLAIM:

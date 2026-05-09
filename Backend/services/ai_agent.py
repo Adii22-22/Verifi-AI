@@ -1,157 +1,137 @@
 import os
+import re
 import json
-import time
 import logging
 from typing import Dict, Any
-from concurrent.futures import ThreadPoolExecutor, as_completed
-from google import genai
+from concurrent.futures import ThreadPoolExecutor
+import requests
 from dotenv import load_dotenv
 from services.search import get_verification_context
 
 load_dotenv()
 
 logger = logging.getLogger(__name__)
-GEMINI_MODEL_NAME = os.getenv("GEMINI_MODEL_NAME", "gemini-2.5-flash")
+GROQ_MODEL = os.getenv("GROQ_MODEL_NAME", "llama-3.1-8b-instant")
+GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+
+# Gemini only for image vision
+try:
+    from google import genai
+    GEMINI_MODEL = os.getenv("GEMINI_MODEL_NAME", "gemini-2.5-flash")
+except ImportError:
+    genai = None
+    GEMINI_MODEL = None
 
 
-def _get_client() -> genai.Client:
-    api_key = os.getenv("GEMINI_API_KEY")
-    if not api_key:
-        raise Exception("GEMINI_API_KEY is not set.")
-    return genai.Client(api_key=api_key)
+# ─── Groq call ────────────────────────────────────────────────────────────────
 
+def _groq(prompt: str) -> str:
+    """Single Groq call. No retries. Fast."""
+    if not GROQ_API_KEY:
+        raise Exception("GROQ_API_KEY not set in .env")
 
-def _generate(client: genai.Client, prompt: str, schema: dict | None = None) -> str:
-    """Single Gemini call with automatic 429 retry."""
-    config = {"response_mime_type": "application/json", "response_schema": schema} if schema else {}
-    for attempt in range(3):
-        try:
-            response = client.models.generate_content(
-                model=GEMINI_MODEL_NAME,
-                contents=prompt,
-                config=config if config else None,
-            )
-            text = getattr(response, "text", None) or ""
-            cleaned = text.strip()
-            for marker in ["```json", "```"]:
-                if cleaned.startswith(marker):
-                    cleaned = cleaned[len(marker):]
-            if cleaned.endswith("```"):
-                cleaned = cleaned[:-3]
-            return cleaned.strip()
-        except Exception as e:
-            err = str(e)
-            if "429" in err or "RESOURCE_EXHAUSTED" in err:
-                wait = (attempt + 1) * 15
-                logger.warning(f"Rate limit hit. Retrying in {wait}s...")
-                if attempt < 2:
-                    time.sleep(wait)
-                else:
-                    raise Exception("Gemini rate limit. Wait a minute and retry.")
-            else:
-                raise
-
-
-_ANALYSIS_SCHEMA = {
-    "type": "object",
-    "properties": {
-        "trustScore":       {"type": "integer", "minimum": 0, "maximum": 100},
-        "factualAccuracy":  {"type": "string", "enum": ["High", "Medium", "Low"]},
-        "biasRating":       {"type": "string", "enum": ["Left", "Right", "Neutral", "Mixed"]},
-        "headline":         {"type": "string"},
-        "headline_hi":      {"type": "string"},
-        "headline_mr":      {"type": "string"},
-        "summary":          {"type": "string"},
-        "summary_hi":       {"type": "string"},
-        "summary_mr":       {"type": "string"},
-        "tags":             {"type": "array", "items": {"type": "string"}, "minItems": 3, "maxItems": 3},
-        "crossReferences": {
-            "type": "array", "maxItems": 3,
-            "items": {
-                "type": "object",
-                "properties": {
-                    "source":         {"type": "string"},
-                    "sourceInitials": {"type": "string"},
-                    "timeAgo":        {"type": "string"},
-                    "trustColor":     {"type": "string", "enum": ["primary", "yellow", "red", "gray"]},
-                    "url":            {"type": "string"},
-                },
-            },
+    resp = requests.post(
+        "https://api.groq.com/openai/v1/chat/completions",
+        headers={"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"},
+        json={
+            "model": GROQ_MODEL,
+            "messages": [
+                {"role": "system", "content": "You are a JSON-only AI. Respond with valid JSON only. No markdown fences. No extra text."},
+                {"role": "user", "content": prompt},
+            ],
+            "temperature": 0.3,
+            "max_completion_tokens": 4096,
+            "response_format": {"type": "json_object"},
         },
-        "claimVerdict": {
-            "type": "array", "maxItems": 3,
-            "items": {
-                "type": "object",
-                "properties": {
-                    "claim":     {"type": "string"},
-                    "claim_hi":  {"type": "string"},
-                    "claim_mr":  {"type": "string"},
-                    "verdict":   {"type": "string", "enum": ["Verified", "False", "Unverified", "Misleading"]},
-                    "reason":    {"type": "string"},
-                    "reason_hi": {"type": "string"},
-                    "reason_mr": {"type": "string"},
-                },
-            },
-        },
-    },
-    "required": ["trustScore", "factualAccuracy", "biasRating", "headline", "headline_hi", "headline_mr", "summary",
-                 "summary_hi", "summary_mr", "tags", "crossReferences", "claimVerdict"],
-}
+        timeout=30,
+    )
+    if resp.status_code != 200:
+        body = resp.text[:300]
+        raise Exception(f"Groq {resp.status_code}: {body}")
+    text = resp.json()["choices"][0]["message"]["content"]
+    return _clean(text)
 
 
-def analyze_credibility(article_text: str) -> Dict[str, Any]:
-    """
-    Fast single-step pipeline:
-      1. One DuckDuckGo search for the article/claim
-      2. One Gemini call that extracts claims, verifies, and synthesizes verdict
-    """
-    client = _get_client()
+def _clean(text: str) -> str:
+    c = text.strip()
+    for m in ["```json", "```"]:
+        if c.startswith(m): c = c[len(m):]
+    if c.endswith("```"): c = c[:-3]
+    return c.strip()
 
-    # Single search — use 4 results for speed (not 6)
-    evidence = get_verification_context(article_text[:150], max_results=4)
+
+# ─── Local keyword extraction ─────────────────────────────────────────────────
+
+_STOP = {"the","a","an","is","are","was","were","be","been","being","have","has","had",
+         "do","does","did","will","would","could","should","may","might","shall","can",
+         "it","its","i","me","my","we","our","you","your","he","she","they","them","their",
+         "this","that","these","those","in","on","at","to","for","of","with","by","from",
+         "and","or","but","not","no","if","then","than","so","as","about","into","over",
+         "after","before","between","under","during","also","just","very","too","more",
+         "most","much","many","some","any","all","each","every","both","few","other",
+         "new","old","said","says","like","get","got","go","went","made","make","take",
+         "been","being","which","who","whom","what","when","where","how","why","up","out"}
+
+def _extract_keywords(text: str, max_words: int = 6) -> str:
+    words = re.findall(r'[A-Za-z]+', text[:500])
+    keywords = []
+    seen = set()
+    for w in words:
+        wl = w.lower()
+        if wl not in _STOP and len(wl) > 2 and wl not in seen:
+            keywords.append(w)
+            seen.add(wl)
+        if len(keywords) >= max_words:
+            break
+    return " ".join(keywords) if keywords else text[:100]
+
+
+def generate_search_query(text: str) -> str:
+    return _extract_keywords(text)
+
+
+# ─── Main analysis ────────────────────────────────────────────────────────────
+
+def analyze_credibility(article_text: str, search_query: str = None) -> Dict[str, Any]:
+    query = search_query if search_query else article_text[:150]
+    evidence = get_verification_context(query, max_results=4)
     if not evidence or evidence == "NO_EVIDENCE_FOUND":
         evidence = "No external evidence retrieved."
 
-    prompt = f"""You are an expert AI News Analyst specializing in fact-checking, bias detection, and credibility assessment.
+    prompt = f"""Analyze this news article/claim for credibility. Return a JSON object with these exact keys:
 
-TASK: Produce a comprehensive credibility report for the article/claim below.
+- "trustScore": integer 0-100 (80-100=well-supported, 60-79=mostly accurate, 40-59=mixed, 0-39=contradicted)
+- "factualAccuracy": "High" or "Medium" or "Low"
+- "biasRating": "Left" or "Right" or "Neutral" or "Mixed"
+- "headline": one-line finding summary
+- "headline_hi": Hindi translation of headline
+- "headline_mr": Marathi translation of headline
+- "summary": 2-3 sentence analysis. IMPORTANT: If the claim is FALSE or MISLEADING, you MUST state what the correct/actual fact is. For example: "This claim is false. In reality, [correct fact based on evidence]." Always provide the corrected version so the user learns the truth.
+- "summary_hi": Hindi translation of summary
+- "summary_mr": Marathi translation of summary
+- "tags": array of exactly 3 topic tags
+- "claimVerdict": array of up to 3 objects, each with "claim", "claim_hi", "claim_mr", "verdict" (Verified/False/Unverified/Misleading), "reason" (if verdict is False or Misleading, MUST include the corrected fact here), "reason_hi", "reason_mr"
+- "crossReferences": array of up to 3 objects with "source", "sourceInitials", "timeAgo", "trustColor" (primary/yellow/red/gray), "url"
 
---- ARTICLE / CLAIM ---
-{article_text[:3000]}
+ARTICLE/CLAIM:
+{article_text[:2500]}
 
---- VERIFICATION EVIDENCE (from news search) ---
-{evidence[:3000]}
+EVIDENCE:
+{evidence[:2500]}
 
-INSTRUCTIONS:
-1. TRUST SCORE (0–100): Score based on evidence support, source quality, factual consistency.
-   - 80–100 = Well-supported by evidence
-   - 60–79 = Mostly accurate, minor issues
-   - 40–59 = Mixed evidence, proceed with caution
-   - 0–39 = Contradicted by evidence or lacks support
-2. FACTUAL ACCURACY: "High" / "Medium" / "Low"
-3. BIAS RATING: "Left" / "Right" / "Neutral" / "Mixed"
-4. HEADLINE: One-line concise summary of your finding.
-5. SUMMARY: 2–3 sentences analyzing the content. If false, state the correction clearly.
-6. CLAIM VERDICT: Identify up to 3 key factual claims from the text. For each: verdict (Verified/False/Unverified/Misleading) + one-sentence reason based on evidence.
-7. TAGS: Exactly 3 topic tags (e.g. Technology, Politics, Health).
-8. CROSS-REFERENCES: Up to 3 sources from the evidence section.
-9. _hi fields: Provide Hindi (हिंदी) translations for headline, summary, claim, and reason.
-10. _mr fields: Provide Marathi (मराठी) translations for headline, summary, claim, and reason.
+Use actual URLs from evidence. Do NOT fabricate URLs. Be concise."""
 
-IMPORTANT: For cross-references, use the actual URLs from the LINK fields in the evidence section above. Do NOT fabricate URLs.
-
-Be objective, evidence-based, and concise."""
-
-    raw = _generate(client, prompt, schema=_ANALYSIS_SCHEMA)
-
+    raw = _groq(prompt)
     try:
         result = json.loads(raw)
     except json.JSONDecodeError as e:
-        raise Exception(f"Failed to parse AI response: {e}\nRaw: {raw[:300]}")
+        raise Exception(f"JSON parse failed: {e}\nRaw: {raw[:300]}")
 
     # Defaults
     result.setdefault("summary_hi", result.get("summary", ""))
     result.setdefault("summary_mr", result.get("summary", ""))
+    result.setdefault("headline_hi", result.get("headline", ""))
+    result.setdefault("headline_mr", result.get("headline", ""))
     result.setdefault("claimVerdict", [])
     result.setdefault("crossReferences", [])
     if not result.get("headline"):
@@ -160,188 +140,96 @@ Be objective, evidence-based, and concise."""
     while len(tags) < 3:
         tags.append("General")
     result["tags"] = tags[:3]
-
     return result
 
 
 def compare_claims(claim_a: str, claim_b: str) -> Dict[str, Any]:
-    """Compare two claims — single Gemini call."""
-    client = _get_client()
-
-    # Run BOTH searches in parallel — cuts search time in HALF
     with ThreadPoolExecutor(max_workers=2) as pool:
-        future_a = pool.submit(get_verification_context, claim_a, 3)
-        future_b = pool.submit(get_verification_context, claim_b, 3)
-        evidence_a = future_a.result()
-        evidence_b = future_b.result()
+        fa = pool.submit(get_verification_context, claim_a, 3)
+        fb = pool.submit(get_verification_context, claim_b, 3)
+        evidence_a = fa.result()
+        evidence_b = fb.result()
 
-    schema = {
-        "type": "object",
-        "properties": {
-            "winner":          {"type": "string", "enum": ["claim_a", "claim_b", "tie"]},
-            "confidence":      {"type": "string", "enum": ["High", "Medium", "Low"]},
-            "reasoning":       {"type": "string"},
-            "claim_a_score":   {"type": "integer", "minimum": 0, "maximum": 100},
-            "claim_b_score":   {"type": "integer", "minimum": 0, "maximum": 100},
-            "claim_a_verdict": {"type": "string", "enum": ["Verified", "False", "Misleading", "Unverified"]},
-            "claim_b_verdict": {"type": "string", "enum": ["Verified", "False", "Misleading", "Unverified"]},
-            "summary":         {"type": "string"},
-        },
-        "required": ["winner", "confidence", "reasoning", "claim_a_score", "claim_b_score",
-                     "claim_a_verdict", "claim_b_verdict", "summary"],
-    }
-
-    prompt = f"""Compare these two claims for credibility. Use evidence to determine which is better supported.
+    prompt = f"""Compare these two claims for credibility. Return JSON with:
+- "winner": "claim_a" or "claim_b" or "tie"
+- "confidence": "High" or "Medium" or "Low"
+- "reasoning": 3-sentence explanation
+- "claim_a_score": integer 0-100
+- "claim_b_score": integer 0-100
+- "claim_a_verdict": "Verified" or "False" or "Misleading" or "Unverified"
+- "claim_b_verdict": "Verified" or "False" or "Misleading" or "Unverified"
+- "summary": one-sentence summary
 
 CLAIM A: {claim_a}
 CLAIM B: {claim_b}
+EVIDENCE A: {evidence_a[:1500] if evidence_a != 'NO_EVIDENCE_FOUND' else 'None.'}
+EVIDENCE B: {evidence_b[:1500] if evidence_b != 'NO_EVIDENCE_FOUND' else 'None.'}"""
 
-EVIDENCE FOR CLAIM A:
-{evidence_a[:2000] if evidence_a != 'NO_EVIDENCE_FOUND' else 'No evidence found.'}
-
-EVIDENCE FOR CLAIM B:
-{evidence_b[:2000] if evidence_b != 'NO_EVIDENCE_FOUND' else 'No evidence found.'}
-
-Provide credibility scores, verdicts, and a 3-sentence reasoning."""
-
-    raw = _generate(client, prompt, schema=schema)
-    try:
-        return json.loads(raw)
-    except json.JSONDecodeError as e:
-        raise Exception(f"Failed to parse compare response: {e}")
+    raw = _groq(prompt)
+    return json.loads(raw)
 
 
-# ─── Image / Photo Analysis ───────────────────────────────────────────────────
-
-_IMAGE_ANALYSIS_SCHEMA = {
-    "type": "object",
-    "properties": {
-        "extracted_text":   {"type": "string"},
-        "is_manipulated":   {"type": "boolean"},
-        "manipulation_signs": {"type": "array", "items": {"type": "string"}, "maxItems": 5},
-        "content_type":     {"type": "string", "enum": ["news_article", "social_media_post", "infographic", "meme", "screenshot", "other"]},
-        "trustScore":       {"type": "integer", "minimum": 0, "maximum": 100},
-        "factualAccuracy":  {"type": "string", "enum": ["High", "Medium", "Low"]},
-        "biasRating":       {"type": "string", "enum": ["Left", "Right", "Neutral", "Mixed"]},
-        "headline":         {"type": "string"},
-        "headline_hi":      {"type": "string"},
-        "headline_mr":      {"type": "string"},
-        "summary":          {"type": "string"},
-        "summary_hi":       {"type": "string"},
-        "summary_mr":       {"type": "string"},
-        "tags":             {"type": "array", "items": {"type": "string"}, "minItems": 3, "maxItems": 3},
-        "claimVerdict": {
-            "type": "array", "maxItems": 3,
-            "items": {
-                "type": "object",
-                "properties": {
-                    "claim":     {"type": "string"},
-                    "claim_hi":  {"type": "string"},
-                    "claim_mr":  {"type": "string"},
-                    "verdict":   {"type": "string", "enum": ["Verified", "False", "Unverified", "Misleading"]},
-                    "reason":    {"type": "string"},
-                    "reason_hi": {"type": "string"},
-                    "reason_mr": {"type": "string"},
-                },
-            },
-        },
-        "crossReferences": {
-            "type": "array", "maxItems": 3,
-            "items": {
-                "type": "object",
-                "properties": {
-                    "source":         {"type": "string"},
-                    "sourceInitials": {"type": "string"},
-                    "timeAgo":        {"type": "string"},
-                    "trustColor":     {"type": "string", "enum": ["primary", "yellow", "red", "gray"]},
-                    "url":            {"type": "string"},
-                },
-            },
-        },
-    },
-    "required": ["extracted_text", "is_manipulated", "content_type", "trustScore",
-                 "factualAccuracy", "biasRating", "headline", "headline_hi", "headline_mr", "summary",
-                 "summary_hi", "summary_mr", "tags", "claimVerdict", "crossReferences"],
-}
-
+# ─── Image Analysis (Gemini Vision only) ──────────────────────────────────────
 
 def analyze_image(image_b64: str, mime_type: str = "image/jpeg") -> Dict[str, Any]:
-    """
-    Analyze a news image/screenshot using Gemini Vision.
-    Extracts text, detects manipulation, and fact-checks claims.
-    """
-    client = _get_client()
+    if not genai:
+        raise Exception("google-genai not installed")
+    api_key = os.getenv("GEMINI_API_KEY")
+    if not api_key:
+        raise Exception("GEMINI_API_KEY needed for image analysis")
 
-    # First: extract text from image with Gemini Vision
-    extract_response = client.models.generate_content(
-        model=GEMINI_MODEL_NAME,
+    client = genai.Client(api_key=api_key)
+
+    extract_resp = client.models.generate_content(
+        model=GEMINI_MODEL,
         contents=[
-            {"text": "Extract ALL text visible in this image. Return only the extracted text, nothing else."},
+            {"text": "Extract ALL visible text from this image. Return only the text."},
             {"inline_data": {"mime_type": mime_type, "data": image_b64}},
         ],
     )
-    extracted_text = getattr(extract_response, "text", "") or ""
+    extracted_text = getattr(extract_resp, "text", "") or ""
 
-    # Search for evidence CONCURRENTLY while we have the extracted text
-    # Use first 150 chars of extracted text for faster search
-    search_text = extracted_text[:150] if extracted_text.strip() else "news image analysis"
+    search_text = extracted_text[:150] if extracted_text.strip() else "news image"
     evidence = get_verification_context(search_text, max_results=4)
     if not evidence or evidence == "NO_EVIDENCE_FOUND":
-        evidence = "No external evidence retrieved."
+        evidence = "No external evidence."
 
-    # Full analysis with image + extracted text + evidence
-    prompt = f"""You are an expert AI Image and News Analyst specializing in detecting misinformation, image manipulation, and propaganda in visual media.
+    prompt = f"""Analyze this image for credibility. Return JSON with:
+- "extracted_text": text found in image
+- "is_manipulated": boolean
+- "manipulation_signs": array of strings
+- "content_type": "news_article" or "social_media_post" or "infographic" or "meme" or "screenshot" or "other"
+- "trustScore": integer 0-100
+- "factualAccuracy": "High" or "Medium" or "Low"
+- "biasRating": "Left" or "Right" or "Neutral" or "Mixed"
+- "headline": one-line summary
+- "headline_hi": Hindi translation
+- "headline_mr": Marathi translation
+- "summary": 2-3 sentence analysis
+- "summary_hi": Hindi translation
+- "summary_mr": Marathi translation
+- "tags": array of 3 topic tags
+- "claimVerdict": array of up to 3 claim objects
+- "crossReferences": array of up to 3 source objects
 
-TASK: Analyze this image for credibility. The image appears to be a news-related image (screenshot, social media post, infographic, meme, etc.).
+EXTRACTED TEXT: {extracted_text[:2500]}
+EVIDENCE: {evidence[:2500]}
+Use actual URLs from evidence."""
 
---- EXTRACTED TEXT FROM IMAGE ---
-{extracted_text[:3000]}
-
---- VERIFICATION EVIDENCE (from news search) ---
-{evidence[:3000]}
-
-INSTRUCTIONS:
-1. EXTRACTED TEXT: Confirm and refine the text extracted from the image.
-2. IS MANIPULATED: Check for signs of image manipulation (cropped context, edited text, doctored photos, misleading framing).
-3. MANIPULATION SIGNS: List any specific signs of manipulation found (empty list if none).
-4. CONTENT TYPE: Classify the image (news_article, social_media_post, infographic, meme, screenshot, other).
-5. TRUST SCORE (0-100): Based on the claims in the image and evidence support.
-6. FACTUAL ACCURACY, BIAS RATING, HEADLINE, SUMMARY: Same as text analysis.
-7. CLAIM VERDICT: Fact-check up to 3 claims found in the image.
-8. CROSS-REFERENCES: Up to 3 sources with URLs from the evidence.
-9. summary_hi: Hindi translation. summary_mr: Marathi translation.
-10. TAGS: 3 topic tags.
-
-IMPORTANT: For cross-references, use actual URLs from the evidence LINK fields. Do NOT fabricate URLs.
-Be especially vigilant about propaganda, out-of-context images, and misleading infographics."""
-
-    # Use vision API with image + text prompt
-    config = {"response_mime_type": "application/json", "response_schema": _IMAGE_ANALYSIS_SCHEMA}
+    config = {"response_mime_type": "application/json"}
     response = client.models.generate_content(
-        model=GEMINI_MODEL_NAME,
-        contents=[
-            {"text": prompt},
-            {"inline_data": {"mime_type": mime_type, "data": image_b64}},
-        ],
+        model=GEMINI_MODEL,
+        contents=[{"text": prompt}, {"inline_data": {"mime_type": mime_type, "data": image_b64}}],
         config=config,
     )
 
-    raw = getattr(response, "text", "") or ""
-    cleaned = raw.strip()
-    for marker in ["```json", "```"]:
-        if cleaned.startswith(marker):
-            cleaned = cleaned[len(marker):]
-    if cleaned.endswith("```"):
-        cleaned = cleaned[:-3]
+    raw = _clean(getattr(response, "text", "") or "")
+    result = json.loads(raw)
 
-    try:
-        result = json.loads(cleaned.strip())
-    except json.JSONDecodeError as e:
-        raise Exception(f"Failed to parse image analysis response: {e}\nRaw: {raw[:300]}")
-
-    # Defaults
     result.setdefault("summary_hi", result.get("summary", ""))
     result.setdefault("summary_mr", result.get("summary", ""))
+    result.setdefault("headline_hi", result.get("headline", ""))
+    result.setdefault("headline_mr", result.get("headline", ""))
     result.setdefault("claimVerdict", [])
     result.setdefault("crossReferences", [])
     result.setdefault("manipulation_signs", [])
@@ -349,5 +237,4 @@ Be especially vigilant about propaganda, out-of-context images, and misleading i
     while len(tags) < 3:
         tags.append("General")
     result["tags"] = tags[:3]
-
     return result

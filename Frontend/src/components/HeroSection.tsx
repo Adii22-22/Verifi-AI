@@ -1,4 +1,4 @@
-import React, { useState, useRef, useCallback } from 'react';
+import React, { useState, useRef, useCallback, useEffect } from 'react';
 
 interface HeroSectionProps {
   onAnalyze: (url: string) => void;
@@ -12,6 +12,7 @@ const HeroSection: React.FC<HeroSectionProps> = ({ onAnalyze, onAnalyzeImage, is
   const [selectedImage, setSelectedImage] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   const handleAnalyze = () => {
     if (selectedImage && onAnalyzeImage) {
@@ -24,8 +25,23 @@ const HeroSection: React.FC<HeroSectionProps> = ({ onAnalyze, onAnalyzeImage, is
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter') handleAnalyze();
+    // Enter submits, Shift+Enter adds a new line
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      handleAnalyze();
+    }
   };
+
+  // Auto-resize textarea
+  useEffect(() => {
+    const ta = textareaRef.current;
+    if (ta) {
+      ta.style.height = 'auto';
+      const newHeight = Math.min(ta.scrollHeight, 180);
+      ta.style.height = newHeight + 'px';
+      ta.style.overflowY = ta.scrollHeight > 180 ? 'auto' : 'hidden';
+    }
+  }, [inputValue]);
 
   const handleFile = useCallback((file: File) => {
     if (!file.type.startsWith("image/")) return;
@@ -126,49 +142,53 @@ const HeroSection: React.FC<HeroSectionProps> = ({ onAnalyze, onAnalyzeImage, is
             </div>
           </div>
         ) : (
-          /* Text input (original) */
-          <div className={`relative flex items-center bg-white dark:bg-card-dark rounded-full shadow-lg dark:shadow-none border transition-all h-16 px-2 focus-within:ring-2 focus-within:ring-primary/50 focus-within:border-primary ${
+          /* Text input — auto-expanding textarea */
+          <div className={`relative flex items-center bg-white dark:bg-card-dark rounded-[1.5rem] shadow-lg dark:shadow-none border transition-all min-h-[4rem] px-2 focus-within:ring-2 focus-within:ring-primary/50 focus-within:border-primary ${
             dragActive ? 'border-primary ring-2 ring-primary/50 border-dashed' : 'border-gray-200 dark:border-white/10'
           }`}>
-            <div className="pl-5 pr-3 text-slate-400 dark:text-slate-500">
+            <div className="pl-4 pr-2 text-slate-400 dark:text-slate-500 flex-shrink-0">
               <span className="material-symbols-outlined text-[28px]">link</span>
             </div>
-            <input
-              type="text"
-              className="flex-1 bg-transparent border-none outline-none text-base md:text-lg text-slate-800 dark:text-white placeholder:text-slate-400 dark:placeholder:text-slate-500 h-full w-full focus:ring-0"
+            <textarea
+              ref={textareaRef}
+              className="flex-1 bg-transparent border-none outline-none text-base md:text-lg text-slate-800 dark:text-white placeholder:text-slate-400 dark:placeholder:text-slate-500 w-full focus:ring-0 resize-none py-4 leading-normal"
               placeholder={dragActive ? "Drop image here..." : "Paste URL, headline, claim, or drop an image..."}
               value={inputValue}
               onChange={(e) => setInputValue(e.target.value)}
               onKeyDown={handleKeyDown}
               onPaste={handlePaste}
+              rows={1}
+              style={{ maxHeight: '180px', overflowY: 'hidden' }}
             />
             {/* Image upload button */}
-            <button
-              onClick={() => fileRef.current?.click()}
-              className="p-2 text-slate-400 hover:text-primary transition-colors rounded-full hover:bg-slate-100 dark:hover:bg-white/5 mr-1"
-              title="Upload image"
-            >
-              <span className="material-symbols-outlined text-[22px]">add_photo_alternate</span>
-            </button>
-            <input
-              ref={fileRef}
-              type="file"
-              accept="image/*"
-              className="hidden"
-              onChange={(e) => { if (e.target.files?.[0]) handleFile(e.target.files[0]); }}
-            />
-            <button
-              onClick={handleAnalyze}
-              disabled={isLoading}
-              className={`bg-primary hover:bg-primary/90 text-background-dark font-bold rounded-full h-12 px-6 ml-1 transition-all transform active:scale-95 flex items-center gap-2 shadow-lg shadow-primary/20 ${isLoading ? 'opacity-80 cursor-wait' : ''}`}
-            >
-              {isLoading ? (
-                <span className="material-symbols-outlined animate-spin">refresh</span>
-              ) : (
-                <span className="material-symbols-outlined">auto_awesome</span>
-              )}
-              <span className="hidden sm:inline">{isLoading ? 'Analyzing...' : 'Analyze'}</span>
-            </button>
+            <div className="flex items-center gap-1 pb-1 shrink-0">
+              <button
+                onClick={() => fileRef.current?.click()}
+                className="p-2 text-slate-400 hover:text-primary transition-colors rounded-full hover:bg-slate-100 dark:hover:bg-white/5"
+                title="Upload image"
+              >
+                <span className="material-symbols-outlined text-[22px]">add_photo_alternate</span>
+              </button>
+              <input
+                ref={fileRef}
+                type="file"
+                accept="image/*"
+                className="hidden"
+                onChange={(e) => { if (e.target.files?.[0]) handleFile(e.target.files[0]); }}
+              />
+              <button
+                onClick={handleAnalyze}
+                disabled={isLoading}
+                className={`bg-primary hover:bg-primary/90 text-background-dark font-bold rounded-full h-12 px-6 ml-1 transition-all transform active:scale-95 flex items-center gap-2 shadow-lg shadow-primary/20 ${isLoading ? 'opacity-80 cursor-wait' : ''}`}
+              >
+                {isLoading ? (
+                  <span className="material-symbols-outlined animate-spin">refresh</span>
+                ) : (
+                  <span className="material-symbols-outlined">auto_awesome</span>
+                )}
+                <span className="hidden sm:inline">{isLoading ? 'Analyzing...' : 'Analyze'}</span>
+              </button>
+            </div>
           </div>
         )}
       </div>

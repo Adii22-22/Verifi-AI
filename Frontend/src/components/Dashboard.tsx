@@ -257,7 +257,7 @@ const Dashboard: React.FC<DashboardProps> = ({ data, language }) => {
                     {cv.verdict}
                   </span>
                   <div>
-                    <p className="text-xs font-medium text-slate-700 dark:text-slate-300 line-clamp-1">{cv.claim}</p>
+                    <p className="text-xs font-medium text-slate-700 dark:text-slate-300">{cv.claim}</p>
                     <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">{cv.reason}</p>
                   </div>
                 </div>

@@ -19,7 +19,7 @@ const steps = [
   {
     icon: "check_circle",
     title: "You're Ready!",
-    desc: "Open any news article, click the Verifi.ai icon, and choose Text or Image mode to analyze.",
+    desc: "Click the Verifi.ai icon in your Chrome toolbar, and the Side Panel opens on the right just like Gemini in Chrome.",
   },
 ];
 
@@ -35,9 +35,9 @@ const features = [
     desc: "Capture a screenshot region or upload an image — like Google Lens for news.",
   },
   {
-    icon: "translate",
-    title: "Multi-Language",
-    desc: "Get AI summaries in English, Hindi, and Marathi.",
+    icon: "contrast",
+    title: "Black & White Modes",
+    desc: "Switch seamlessly between sleek pure Black mode and crisp White mode.",
   },
   {
     icon: "security",

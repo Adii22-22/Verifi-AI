@@ -10,9 +10,10 @@ interface NavbarProps {
   onLogout: () => void;
   darkMode: boolean;
   setDarkMode: (v: boolean) => void;
+  onHomeClick?: () => void;
 }
 
-const Navbar: React.FC<NavbarProps> = ({ setLanguage, user, onAuthSuccess, onLogout, darkMode, setDarkMode }) => {
+const Navbar: React.FC<NavbarProps> = ({ setLanguage, user, onAuthSuccess, onLogout, darkMode, setDarkMode, onHomeClick }) => {
   const [showAuth, setShowAuth] = useState(false);
   const [showUserMenu, setShowUserMenu] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -27,7 +28,6 @@ const Navbar: React.FC<NavbarProps> = ({ setLanguage, user, onAuthSuccess, onLog
         setShowUserMenu(false);
       }
       if (mobileMenuRef.current && !mobileMenuRef.current.contains(e.target as Node)) {
-        // Don't close if clicking the hamburger button itself
         const hamburger = document.getElementById("hamburger-btn");
         if (hamburger && hamburger.contains(e.target as Node)) return;
         setMobileOpen(false);
@@ -43,11 +43,10 @@ const Navbar: React.FC<NavbarProps> = ({ setLanguage, user, onAuthSuccess, onLog
   }, [location.pathname]);
 
   const navLinks = [
-    { to: "/", label: "Analyze", icon: "auto_awesome" },
-    { to: "/compare", label: "Compare", icon: "compare_arrows" },
-    { to: "/history", label: "History", icon: "history" },
-    { to: "/leaderboard", label: "Leaderboard", icon: "leaderboard" },
+    { to: "/", label: "Home", icon: "auto_awesome" },
+    { to: "/news", label: "Live News", icon: "newspaper", pulse: true },
     { to: "/extension", label: "Extension", icon: "extension" },
+    { to: "/history", label: "History", icon: "history" },
   ];
 
   return (
@@ -55,8 +54,8 @@ const Navbar: React.FC<NavbarProps> = ({ setLanguage, user, onAuthSuccess, onLog
       <nav className="sticky top-0 z-50 w-full border-b border-gray-200 dark:border-white/5 bg-background-light/80 dark:bg-background-dark/80 backdrop-blur-md">
         <div className="max-w-7xl mx-auto px-6 h-16 flex items-center justify-between gap-4">
           {/* Logo */}
-          <Link to="/" className="flex items-center gap-2.5 shrink-0">
-            <div className="size-9 rounded-xl bg-primary flex items-center justify-center text-background-dark shadow-glow">
+          <Link to="/" onClick={onHomeClick} className="flex items-center gap-2.5 shrink-0 group">
+            <div className="size-9 rounded-xl bg-primary flex items-center justify-center text-background-dark shadow-glow group-hover:shadow-glow-lg transition-shadow duration-300">
               <span className="material-symbols-outlined text-xl">verified_user</span>
             </div>
             <span className="font-bold text-lg tracking-tight text-slate-900 dark:text-white">Verifi.ai</span>
@@ -64,20 +63,22 @@ const Navbar: React.FC<NavbarProps> = ({ setLanguage, user, onAuthSuccess, onLog
 
           {/* Desktop nav links */}
           <div className="hidden md:flex items-center gap-1">
-            {navLinks.map(({ to, label, icon }) => {
+            {navLinks.map(({ to, label, icon, pulse }) => {
               const active = location.pathname === to;
               return (
                 <Link
                   key={to}
                   to={to}
-                  className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium transition-all ${
+                  onClick={to === "/" ? onHomeClick : undefined}
+                  className={`flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-sm font-medium transition-all duration-200 ${
                     active
-                      ? "bg-primary/10 text-primary"
+                      ? "bg-primary/10 text-primary shadow-sm"
                       : "text-slate-500 hover:text-primary dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-white/5"
                   }`}
                 >
                   <span className="material-symbols-outlined text-[18px]">{icon}</span>
                   {label}
+                  {pulse && <span className="size-2 rounded-full bg-primary animate-pulse" />}
                 </Link>
               );
             })}
@@ -88,7 +89,7 @@ const Navbar: React.FC<NavbarProps> = ({ setLanguage, user, onAuthSuccess, onLog
             {/* Dark mode toggle */}
             <button
               onClick={() => setDarkMode(!darkMode)}
-              className="size-9 rounded-full bg-slate-100 dark:bg-surface-dark flex items-center justify-center hover:bg-primary/10 dark:hover:bg-primary/10 transition-colors text-slate-600 dark:text-slate-300 hover:text-primary"
+              className="size-9 rounded-full bg-slate-100 dark:bg-surface-dark flex items-center justify-center hover:bg-primary/10 dark:hover:bg-primary/10 transition-all duration-200 text-slate-600 dark:text-slate-300 hover:text-primary hover:scale-105 active:scale-95"
               title={darkMode ? "Switch to light mode" : "Switch to dark mode"}
             >
               <span className="material-symbols-outlined text-[18px]">
@@ -99,7 +100,7 @@ const Navbar: React.FC<NavbarProps> = ({ setLanguage, user, onAuthSuccess, onLog
             {/* Language selector */}
             <select
               onChange={(e) => setLanguage(e.target.value as "en" | "hi" | "mr")}
-              className="text-xs border border-gray-300 dark:border-white/10 rounded-lg px-2 py-1.5 text-slate-700 dark:text-slate-200 bg-white dark:bg-surface-dark focus:outline-none focus:ring-1 focus:ring-primary cursor-pointer"
+              className="text-xs border border-gray-300 dark:border-white/10 rounded-lg px-2 py-1.5 text-slate-700 dark:text-slate-200 bg-white dark:bg-surface-dark focus:outline-none focus:ring-1 focus:ring-primary cursor-pointer transition-colors"
             >
               <option value="en">EN</option>
               <option value="hi">हि</option>
@@ -111,7 +112,7 @@ const Navbar: React.FC<NavbarProps> = ({ setLanguage, user, onAuthSuccess, onLog
               <div className="relative" ref={userMenuRef}>
                 <button
                   onClick={() => setShowUserMenu(!showUserMenu)}
-                  className="flex items-center gap-2 pl-2 pr-3 py-1.5 rounded-full bg-slate-100 dark:bg-surface-dark hover:bg-primary/10 dark:hover:bg-primary/10 transition-colors"
+                  className="flex items-center gap-2 pl-2 pr-3 py-1.5 rounded-full bg-slate-100 dark:bg-surface-dark hover:bg-primary/10 dark:hover:bg-primary/10 transition-all duration-200"
                 >
                   <div className="size-7 rounded-full bg-primary flex items-center justify-center text-background-dark font-bold text-sm">
                     {user.name.charAt(0).toUpperCase()}
@@ -123,7 +124,7 @@ const Navbar: React.FC<NavbarProps> = ({ setLanguage, user, onAuthSuccess, onLog
                 </button>
 
                 {showUserMenu && (
-                  <div className="absolute right-0 top-12 bg-white dark:bg-card-dark border border-gray-200 dark:border-white/10 rounded-2xl shadow-xl w-48 py-2 z-50 animate-fade-in">
+                  <div className="absolute right-0 top-12 bg-white dark:bg-card-dark border border-gray-200 dark:border-white/10 rounded-2xl shadow-xl w-48 py-2 z-50 animate-scale-in origin-top-right">
                     <div className="px-4 py-2 border-b border-gray-100 dark:border-white/5 mb-1">
                       <p className="text-xs font-semibold text-slate-900 dark:text-white truncate">{user.name}</p>
                       <p className="text-xs text-slate-400 truncate">{user.email}</p>
@@ -149,7 +150,7 @@ const Navbar: React.FC<NavbarProps> = ({ setLanguage, user, onAuthSuccess, onLog
             ) : (
               <button
                 onClick={() => setShowAuth(true)}
-                className="flex items-center gap-1.5 px-4 py-2 bg-primary hover:bg-primary/90 text-background-dark font-bold rounded-full text-sm transition-all shadow-lg shadow-primary/20"
+                className="flex items-center gap-1.5 px-4 py-2 bg-primary hover:bg-primary/90 text-background-dark font-bold rounded-full text-sm transition-all shadow-lg shadow-primary/20 hover:shadow-glow active:scale-95"
               >
                 <span className="material-symbols-outlined text-[16px]">login</span>
                 Login
@@ -160,7 +161,7 @@ const Navbar: React.FC<NavbarProps> = ({ setLanguage, user, onAuthSuccess, onLog
             <button
               id="hamburger-btn"
               onClick={() => setMobileOpen(!mobileOpen)}
-              className="md:hidden size-9 rounded-full bg-slate-100 dark:bg-surface-dark flex items-center justify-center text-slate-600 dark:text-slate-300 hover:bg-primary/10 transition-colors"
+              className="md:hidden size-9 rounded-full bg-slate-100 dark:bg-surface-dark flex items-center justify-center text-slate-600 dark:text-slate-300 hover:bg-primary/10 transition-all duration-200 active:scale-95"
             >
               <span className="material-symbols-outlined text-[20px]">{mobileOpen ? "close" : "menu"}</span>
             </button>
@@ -173,12 +174,13 @@ const Navbar: React.FC<NavbarProps> = ({ setLanguage, user, onAuthSuccess, onLog
             ref={mobileMenuRef}
             className="md:hidden border-t border-gray-200 dark:border-white/5 bg-background-light dark:bg-background-dark px-6 pb-4 pt-2 space-y-1 animate-fade-in"
           >
-            {navLinks.map(({ to, label, icon }) => {
+            {navLinks.map(({ to, label, icon, pulse }) => {
               const active = location.pathname === to;
               return (
                 <Link
                   key={to}
                   to={to}
+                  onClick={to === "/" ? onHomeClick : undefined}
                   className={`flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-all ${
                     active
                       ? "bg-primary/10 text-primary"
@@ -187,6 +189,7 @@ const Navbar: React.FC<NavbarProps> = ({ setLanguage, user, onAuthSuccess, onLog
                 >
                   <span className="material-symbols-outlined text-[20px]">{icon}</span>
                   {label}
+                  {pulse && <span className="size-2 rounded-full bg-primary animate-pulse ml-auto" />}
                 </Link>
               );
             })}

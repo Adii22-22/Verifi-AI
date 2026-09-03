@@ -86,15 +86,15 @@ const HeroSection: React.FC<HeroSectionProps> = ({ onAnalyze, onAnalyzeImage, is
   };
 
   return (
-    <section className="flex flex-col items-center justify-center max-w-3xl mx-auto text-center w-full space-y-8 animate-fade-in-up">
+    <section className="flex flex-col items-center justify-center max-w-3xl mx-auto text-center w-full space-y-8 opacity-0 animate-fade-in-up">
       <div className="space-y-4">
-        <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-primary/10 border border-primary/20 text-primary text-xs font-semibold uppercase tracking-wider mb-2">
+        <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-primary/10 border border-primary/20 text-primary text-xs font-semibold uppercase tracking-wider mb-2 shimmer-bg">
           <span className="w-2 h-2 rounded-full bg-primary animate-pulse"></span>
           System Online
         </div>
         <h1 className="text-4xl md:text-5xl font-extrabold tracking-tight text-slate-900 dark:text-white leading-[1.15]">
           Verify the truth behind<br />
-          <span className="text-transparent bg-clip-text bg-gradient-to-r from-primary to-emerald-400">every headline.</span>
+          <span className="gradient-text">every headline.</span>
         </h1>
         <p className="text-lg text-slate-500 dark:text-slate-400 max-w-xl mx-auto leading-relaxed">
           Analyze text, URLs, or <strong>upload images</strong> — our multi-source AI engine fact-checks it all.
@@ -109,7 +109,7 @@ const HeroSection: React.FC<HeroSectionProps> = ({ onAnalyze, onAnalyzeImage, is
         onDragOver={handleDrag}
         onDrop={handleDrop}
       >
-        <div className="absolute -inset-1 bg-gradient-to-r from-primary/30 to-emerald-500/30 rounded-2xl blur opacity-20 group-hover:opacity-40 transition duration-500"></div>
+        <div className="absolute -inset-1 bg-gradient-to-r from-primary/30 to-emerald-500/30 rounded-2xl blur opacity-20 group-hover:opacity-50 transition duration-700 group-hover:scale-[1.02]"></div>
 
         {/* Image preview */}
         {previewUrl && selectedImage ? (
@@ -179,7 +179,7 @@ const HeroSection: React.FC<HeroSectionProps> = ({ onAnalyze, onAnalyzeImage, is
               <button
                 onClick={handleAnalyze}
                 disabled={isLoading}
-                className={`bg-primary hover:bg-primary/90 text-background-dark font-bold rounded-full h-12 px-6 ml-1 transition-all transform active:scale-95 flex items-center gap-2 shadow-lg shadow-primary/20 ${isLoading ? 'opacity-80 cursor-wait' : ''}`}
+                className={`bg-primary hover:bg-primary/90 text-background-dark font-bold rounded-full h-12 px-6 ml-1 transition-all duration-300 transform active:scale-95 hover:shadow-glow-lg flex items-center gap-2 shadow-lg shadow-primary/20 ${isLoading ? 'opacity-80 cursor-wait' : 'hover:scale-105'}`}
               >
                 {isLoading ? (
                   <span className="material-symbols-outlined animate-spin">refresh</span>

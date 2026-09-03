@@ -40,14 +40,56 @@
   .scrollbar-hide::-webkit-scrollbar {
     display: none;
   }
+
+  /* Staggered animation delays for children */
+  .stagger-children > *:nth-child(1) { animation-delay: 0ms; }
+  .stagger-children > *:nth-child(2) { animation-delay: 60ms; }
+  .stagger-children > *:nth-child(3) { animation-delay: 120ms; }
+  .stagger-children > *:nth-child(4) { animation-delay: 180ms; }
+  .stagger-children > *:nth-child(5) { animation-delay: 240ms; }
+  .stagger-children > *:nth-child(6) { animation-delay: 300ms; }
+  .stagger-children > *:nth-child(7) { animation-delay: 360ms; }
+  .stagger-children > *:nth-child(8) { animation-delay: 420ms; }
+  .stagger-children > *:nth-child(9) { animation-delay: 480ms; }
+  .stagger-children > *:nth-child(10) { animation-delay: 540ms; }
+  .stagger-children > *:nth-child(11) { animation-delay: 600ms; }
+  .stagger-children > *:nth-child(12) { animation-delay: 660ms; }
+
+  /* Shimmer gradient background */
+  .shimmer-bg {
+    background: linear-gradient(
+      90deg,
+      transparent 0%,
+      rgba(83, 210, 45, 0.06) 50%,
+      transparent 100%
+    );
+    background-size: 200% 100%;
+    animation: shimmer 2s linear infinite;
+  }
+
+  /* Gradient text */
+  .gradient-text {
+    @apply text-transparent bg-clip-text;
+    background-image: linear-gradient(135deg, #53d22d 0%, #34d399 50%, #53d22d 100%);
+    background-size: 200% auto;
+    animation: gradientX 3s ease infinite;
+  }
+
+  /* Card hover lift */
+  .card-hover {
+    @apply transition-all duration-300;
+  }
+  .card-hover:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 8px 30px -12px rgba(83, 210, 45, 0.15);
+  }
 }
 
 @layer utilities {
-  /* Fade in animations */
   @keyframes fadeInUp {
     from {
       opacity: 0;
-      transform: translateY(20px);
+      transform: translateY(24px);
     }
     to {
       opacity: 1;
@@ -56,19 +98,17 @@
   }
 
   @keyframes fadeIn {
-    from {
-      opacity: 0;
-    }
-    to {
-      opacity: 1;
-    }
+    from { opacity: 0; }
+    to { opacity: 1; }
   }
 
-  .animate-fade-in-up {
-    animation: fadeInUp 0.8s ease-out forwards;
+  @keyframes shimmer {
+    0% { background-position: -200% 0; }
+    100% { background-position: 200% 0; }
   }
 
-  .animate-fade-in {
-    animation: fadeIn 0.5s ease-out forwards;
+  @keyframes gradientX {
+    0%, 100% { background-position: 0% 50%; }
+    50% { background-position: 100% 50%; }
   }
 }

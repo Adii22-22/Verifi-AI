@@ -1,4 +1,4 @@
-import { AnalysisResult, TrendingArticle, HistoryItem, CompareResult } from "../../types";
+import { AnalysisResult, TrendingArticle, HistoryItem } from "../../types";
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
 
@@ -46,29 +46,34 @@ export const getMe = async () => {
 // ─── Analyze ──────────────────────────────────────────────────────────────────
 
 export const analyzeContent = async (text: string): Promise<AnalysisResult> => {
-  const res = await fetch(`${API_BASE_URL}/analyze`, {
-    method: "POST",
-    headers: getAuthHeaders(),
-    body: JSON.stringify({ text }),
-  });
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({ detail: res.statusText }));
-    throw new Error(err.detail || `API error: ${res.statusText}`);
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 30000);
+
+  try {
+    const res = await fetch(`${API_BASE_URL}/analyze`, {
+      method: "POST",
+      headers: getAuthHeaders(),
+      body: JSON.stringify({ text }),
+      signal: controller.signal,
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: res.statusText }));
+      throw new Error(err.detail || `API error: ${res.statusText}`);
+    }
+    const data = await res.json();
+    return {
+      trustScore: data.trustScore,
+      factualAccuracy: data.factualAccuracy,
+      biasRating: data.biasRating,
+      headline: data.headline,
+      summary: data.summary,
+      tags: data.tags,
+      crossReferences: data.crossReferences || [],
+      claimVerdict: data.claimVerdict || [],
+    };
+  } finally {
+    clearTimeout(timeout);
   }
-  const data = await res.json();
-  return {
-    trustScore: data.trustScore,
-    factualAccuracy: data.factualAccuracy,
-    biasRating: data.biasRating,
-    headline: data.headline,
-    summary: data.summary,
-    summary_hi: data.summary_hi,
-    summary_mr: data.summary_mr,
-    tags: data.tags,
-    crossReferences: data.crossReferences,
-    claimVerdict: data.claimVerdict || [],
-    sourceReputation: data.sourceReputation || null,
-  };
 };
 
 // ─── Analyze Image ────────────────────────────────────────────────────────────
@@ -81,34 +86,38 @@ export const analyzeImage = async (file: File): Promise<AnalysisResult> => {
   const headers: Record<string, string> = {};
   if (token) headers["Authorization"] = `Bearer ${token}`;
 
-  const res = await fetch(`${API_BASE_URL}/analyze-image`, {
-    method: "POST",
-    headers,
-    body: formData,
-  });
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({ detail: res.statusText }));
-    throw new Error(err.detail || `Image analysis failed: ${res.statusText}`);
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 60000);
+
+  try {
+    const res = await fetch(`${API_BASE_URL}/analyze-image`, {
+      method: "POST",
+      headers,
+      body: formData,
+      signal: controller.signal,
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: res.statusText }));
+      throw new Error(err.detail || `Image analysis failed: ${res.statusText}`);
+    }
+    const data = await res.json();
+    return {
+      trustScore: data.trustScore,
+      factualAccuracy: data.factualAccuracy,
+      biasRating: data.biasRating,
+      headline: data.headline,
+      summary: data.summary,
+      tags: data.tags,
+      crossReferences: data.crossReferences || [],
+      claimVerdict: data.claimVerdict || [],
+      extracted_text: data.extracted_text,
+      is_manipulated: data.is_manipulated,
+      manipulation_signs: data.manipulation_signs || [],
+      content_type: data.content_type,
+    };
+  } finally {
+    clearTimeout(timeout);
   }
-  const data = await res.json();
-  return {
-    trustScore: data.trustScore,
-    factualAccuracy: data.factualAccuracy,
-    biasRating: data.biasRating,
-    headline: data.headline,
-    summary: data.summary,
-    summary_hi: data.summary_hi,
-    summary_mr: data.summary_mr,
-    tags: data.tags,
-    crossReferences: data.crossReferences || [],
-    claimVerdict: data.claimVerdict || [],
-    sourceReputation: data.sourceReputation || null,
-    // Image-specific fields
-    extracted_text: data.extracted_text,
-    is_manipulated: data.is_manipulated,
-    manipulation_signs: data.manipulation_signs || [],
-    content_type: data.content_type,
-  };
 };
 
 // ─── History ──────────────────────────────────────────────────────────────────
@@ -127,29 +136,6 @@ export const deleteHistoryItem = async (id: string): Promise<void> => {
     headers: getAuthHeaders(),
   });
   if (!res.ok) throw new Error("Failed to delete history item");
-};
-
-// ─── Compare ─────────────────────────────────────────────────────────────────
-
-export const compareContent = async (claim_a: string, claim_b: string): Promise<CompareResult> => {
-  const res = await fetch(`${API_BASE_URL}/compare`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ claim_a, claim_b }),
-  });
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({ detail: res.statusText }));
-    throw new Error(err.detail || "Comparison failed");
-  }
-  return res.json();
-};
-
-// ─── Leaderboard ──────────────────────────────────────────────────────────────
-
-export const fetchLeaderboard = async () => {
-  const res = await fetch(`${API_BASE_URL}/leaderboard`);
-  if (!res.ok) throw new Error("Failed to fetch leaderboard");
-  return res.json();
 };
 
 // ─── News feed ────────────────────────────────────────────────────────────────
@@ -173,7 +159,6 @@ export const fetchTrendingNews = async (): Promise<TrendingArticle[]> => {
       };
       const sourceColor = sourceColors[sourceName.toLowerCase()] || "bg-slate-600";
 
-      // Use consistent picsum seed (not random) as fallback for missing og:image
       const image = article.image || `https://picsum.photos/seed/${encodeURIComponent(article.title.slice(0, 20))}/400/300`;
 
       const categories = ["Technology", "Finance", "Politics", "Science", "Health", "Sports", "Entertainment", "World"];
@@ -195,7 +180,6 @@ export const fetchTrendingNews = async (): Promise<TrendingArticle[]> => {
       return {
         id: `trending-${idx}`,
         image,
-        trustScore: 0, // not analyzed yet — no fake score
         source: sourceName.charAt(0).toUpperCase() + sourceName.slice(1),
         sourceColor,
         sourceInitial,

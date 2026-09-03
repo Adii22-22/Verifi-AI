@@ -94,13 +94,8 @@ function verifiOpen() {
           '<span>Results</span>',
         '</div>',
         '<div class="vf-hdr-actions">',
-          '<select id="vf-lang" class="vf-lang-sel" style="display:none">',
-            '<option value="en">EN</option>',
-            '<option value="hi">\u0939\u093F\u0902\u0926\u0940</option>',
-            '<option value="mr">\u092E\u0930\u093E\u0920\u0940</option>',
-          '</select>',
-          '<button id="vf-btn-theme" class="vf-theme-btn">' + (panelTheme === "dark" ? ICO.sun + " Light" : ICO.moon + " Dark") + '</button>',
-          '<button id="vf-btn-panel-close" class="vf-icon-btn vf-close-hover">' + ICO.close + '</button>',
+          '<button id="vf-btn-theme" class="vf-theme-btn">' + (panelTheme === "dark" ? ICO.sun + " White" : ICO.moon + " Black") + '</button>',
+          '<button id="vf-btn-panel-close" class="vf-icon-btn vf-close-hover" title="Close">' + ICO.close + '</button>',
         '</div>',
       '</div>',
       '<div id="vf-panel-body"></div>',
@@ -192,7 +187,7 @@ function verifiSetup(root) {
     }
   }
 
-  /* ── Theme toggle ── */
+  /* ── Theme toggle (Simple Black / White mode switch) ── */
   var themeBtn = document.getElementById("vf-btn-theme");
   if (themeBtn) {
     themeBtn.onclick = function() {
@@ -200,22 +195,12 @@ function verifiSetup(root) {
       try { localStorage.setItem("vf_theme", panelTheme); } catch(e) {}
       if (panelTheme === "light") {
         panel.classList.add("vf-light");
-        themeBtn.innerHTML = ICO.moon + " Dark";
+        themeBtn.innerHTML = ICO.moon + " Black";
       } else {
         panel.classList.remove("vf-light");
-        themeBtn.innerHTML = ICO.sun + " Light";
+        themeBtn.innerHTML = ICO.sun + " White";
       }
     };
-  }
-
-  /* ── Language toggle ── */
-  var langSel = document.getElementById("vf-lang");
-  if (langSel) {
-    langSel.addEventListener("change", function() {
-      if (savedData && !panel.classList.contains("vf-panel-hidden")) {
-        renderResults(savedData);
-      }
-    });
   }
 
   /* ── ESC ── */
@@ -361,45 +346,36 @@ function verifiSetup(root) {
     img.src = verifiSS;
   }
 
-  /* ────────────── API ────────────── */
-  function _apiHeaders(extra) {
-    var h = Object.assign({ "Content-Type": "application/json" }, extra || {});
-    if (_authToken) h["Authorization"] = "Bearer " + _authToken;
-    return h;
-  }
-
+  /* ────────────── API (routed via background service worker) ────────────── */
   function analyzeText(text) {
-    showLoading("Analyzing text\u2026");
-    fetch(VERIFI_API + "/analyze", {
-      method: "POST",
-      headers: _apiHeaders(),
-      body: JSON.stringify({ text: text })
-    })
-    .then(handleResponse)
-    .then(function(d) { savedData = d; renderResults(d); })
-    .catch(function(e) { showError(e.message); });
+    showLoading("Analyzing text with AI fact-checker…");
+    chrome.runtime.sendMessage({ type: "ANALYZE_TEXT", text: text, token: _authToken }, function(res) {
+      if (!res) {
+        showError("Background service not responding. Reload the tab and try again.");
+        return;
+      }
+      if (res.ok && res.data) {
+        savedData = res.data;
+        renderResults(res.data);
+      } else {
+        showError(res.error || "Analysis failed. Ensure Verifi.ai backend is running on http://localhost:8000");
+      }
+    });
   }
 
   function analyzeImage(dataUrl) {
-    showLoading("Analyzing image\u2026");
-    fetch(dataUrl).then(function(r) { return r.blob(); })
-    .then(function(blob) {
-      var fd = new FormData();
-      fd.append("file", blob, "capture.png");
-      var h = {};
-      if (_authToken) h["Authorization"] = "Bearer " + _authToken;
-      return fetch(VERIFI_API + "/analyze-image", { method: "POST", headers: h, body: fd });
-    })
-    .then(handleResponse)
-    .then(function(d) { savedData = d; renderResults(d); })
-    .catch(function(e) { showError(e.message); });
-  }
-
-  function handleResponse(r) {
-    if (!r.ok) throw new Error("Server " + r.status + " \u2014 is the backend running?");
-    return r.json().then(function(d) {
-      if (d.detail) throw new Error(d.detail);
-      return d;
+    showLoading("Analyzing image & extracting visual claims…");
+    chrome.runtime.sendMessage({ type: "ANALYZE_IMAGE", dataUrl: dataUrl, token: _authToken }, function(res) {
+      if (!res) {
+        showError("Background service not responding. Reload the tab and try again.");
+        return;
+      }
+      if (res.ok && res.data) {
+        savedData = res.data;
+        renderResults(res.data);
+      } else {
+        showError(res.error || "Image analysis failed. Ensure Verifi.ai backend is running.");
+      }
     });
   }
 
@@ -415,20 +391,17 @@ function verifiSetup(root) {
     pbody.innerHTML = [
       '<div class="vf-error">',
         '<div class="vf-error-icon">\u26A0\uFE0F</div>',
-        '<h4>Something went wrong</h4>',
+        '<h4>Analysis Encountered an Issue</h4>',
         '<p>' + esc(msg || "Unknown error") + '</p>',
-        '<a class="vf-error-link" href="' + VERIFI_API + '/health" target="_blank">' + ICO.search + ' Check backend</a>',
+        '<a class="vf-error-link" href="' + VERIFI_API + '/health" target="_blank">' + ICO.search + ' Check Backend Status</a>',
       '</div>'
     ].join("");
   }
 
   /* ────────────── RENDER RESULTS ────────────── */
   function renderResults(data) {
-    var lang = langSel ? langSel.value : "en";
-    if (langSel) langSel.style.display = "block";
-
     var score = Math.round(data.trustScore || 0);
-    var clr   = score >= 70 ? "#34d399" : score >= 50 ? "#fbbf24" : "#fb7185";
+    var clr   = score >= 70 ? "#53d22d" : score >= 50 ? "#fbbf24" : "#fb7185";
     var R = 28, circ = +(2 * Math.PI * R).toFixed(2);
     var dash = +(circ - (score / 100) * circ).toFixed(2);
 
@@ -437,10 +410,11 @@ function verifiSetup(root) {
     var accC  = acc === "High" ? "vf-badge-green" : acc === "Medium" ? "vf-badge-yellow" : acc ? "vf-badge-red" : "vf-badge-gray";
     var biasC = bias === "Neutral" || bias === "None" ? "vf-badge-green" : bias ? "vf-badge-yellow" : "vf-badge-gray";
 
-    var headline = loc(data, "headline", lang) || "Analysis Complete";
-    var summary  = loc(data, "summary", lang) || "No summary available.";
+    var headline = data.headline || "Analysis Complete";
+    var summary  = data.summary || "No summary available.";
     var isImg    = data.extracted_text !== undefined || data.is_manipulated !== undefined;
     var claims   = data.claimVerdict || [];
+    var sources  = data.crossReferences || [];
     var tags     = data.tags || [];
 
     var h = [];
@@ -479,55 +453,69 @@ function verifiSetup(root) {
 
     /* Extracted text */
     if (isImg && data.extracted_text) {
-      h.push('<div class="vf-card"><div class="vf-label">Extracted Text</div>');
+      h.push('<div class="vf-card"><div class="vf-label">Extracted Text from Image</div>');
       h.push('<p class="vf-mono">' + esc(data.extracted_text) + '</p></div>');
     }
 
     /* Summary */
-    h.push('<div class="vf-card"><div class="vf-label">Summary</div>');
+    h.push('<div class="vf-card"><div class="vf-label">AI Credibility Finding</div>');
     h.push('<p class="vf-summary-text">' + esc(summary) + '</p></div>');
 
     /* Claim verdicts */
     if (claims.length > 0) {
-      var vTitle = lang === "hi" ? "\u0926\u093E\u0935\u093E \u0928\u093F\u0930\u094D\u0923\u092F" : lang === "mr" ? "\u0926\u093E\u0935\u093E \u0928\u093F\u0915\u093E\u0932" : "Claim Verdicts";
-      h.push('<div class="vf-label" style="margin-top:6px">' + vTitle + '</div>');
+      h.push('<div class="vf-label" style="margin-top:8px">Claim Breakdown</div>');
       claims.forEach(function(c) {
-        var ct = loc(c, "claim", lang);
-        var rt = loc(c, "reason", lang);
+        var ct = c.claim || "";
+        var rt = c.reason || "";
         var vl = (c.verdict || "").toLowerCase();
-        var dc = vl === "verified" ? "#34d399" : vl === "false" ? "#fb7185" : vl === "misleading" ? "#fbbf24" : "#6b7280";
+        var dc = vl === "verified" ? "#53d22d" : vl === "false" ? "#fb7185" : vl === "misleading" ? "#fbbf24" : "#6b7280";
         var ic = vl === "verified" ? "\u2713" : vl === "false" ? "\u2717" : "!";
         h.push('<div class="vf-verdict">');
         h.push('<div class="vf-verdict-dot" style="background:' + dc + '">' + ic + '</div>');
         h.push('<div class="vf-verdict-body">');
-        h.push('<strong>' + esc(c.verdict || "Unknown") + '</strong>');
+        h.push('<strong>' + esc(c.verdict || "Verdict") + '</strong>');
         if (ct) h.push('<div class="vf-verdict-claim">' + esc(ct) + '</div>');
         if (rt) h.push('<div class="vf-verdict-reason">' + esc(rt) + '</div>');
         h.push('</div></div>');
       });
     }
 
+    /* Cross References */
+    if (sources.length > 0) {
+      h.push('<div class="vf-label" style="margin-top:10px">Cross-Reference Sources</div>');
+      h.push('<div class="vf-card" style="padding:10px 14px;">');
+      sources.forEach(function(s) {
+        var sName = esc(s.source || "Source");
+        var sTime = esc(s.timeAgo || "");
+        var sUrl  = s.url || "";
+        if (sUrl) {
+          h.push('<a href="' + esc(sUrl) + '" target="_blank" rel="noopener noreferrer" style="display:flex; justify-content:space-between; align-items:center; text-decoration:none; padding:8px 0; border-bottom:1px solid var(--p-border); color:var(--p-text); font-size:12px;">');
+          h.push('<div><strong>' + sName + '</strong> <span style="color:var(--p-text3); font-size:11px;">' + sTime + '</span></div>');
+          h.push('<span style="color:var(--p-accent); font-size:11px;">Open \u2197</span>');
+          h.push('</a>');
+        } else {
+          h.push('<div style="display:flex; justify-content:space-between; padding:8px 0; border-bottom:1px solid var(--p-border); font-size:12px; color:var(--p-text2);">' + sName + ' <span>' + sTime + '</span></div>');
+        }
+      });
+      h.push('</div>');
+    }
+
     /* Tags */
     if (tags.length > 0) {
       h.push('<div class="vf-tags">');
-      tags.forEach(function(t) { h.push('<span class="vf-tag">' + esc(t) + '</span>'); });
+      tags.forEach(function(t) { h.push('<span class="vf-tag">#' + esc(t) + '</span>'); });
       h.push('</div>');
     }
 
     /* CTA */
     h.push('<a href="http://localhost:5173" target="_blank" class="vf-cta">');
-    h.push(ICO.grid + ' Open Dashboard ' + ICO.arrow + '</a>');
+    h.push(ICO.grid + ' Open Full Verifi.ai Dashboard ' + ICO.arrow + '</a>');
 
     panel.classList.remove("vf-panel-hidden");
     pbody.innerHTML = h.join("");
   }
 
-  /* ── Helpers ── */
-  function loc(obj, key, lang) {
-    if (lang === "hi" && obj[key + "_hi"]) return obj[key + "_hi"];
-    if (lang === "mr" && obj[key + "_mr"]) return obj[key + "_mr"];
-    return obj[key] || "";
-  }
+  /* ── Helper ── */
   function esc(s) {
     return String(s || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
   }

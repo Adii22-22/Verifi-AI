@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { AnalysisResult, ClaimVerdict } from '../../types';
 
@@ -101,10 +101,7 @@ const Dashboard: React.FC<DashboardProps> = ({ data, language }) => {
   const circumference = 2 * Math.PI * radius;
   const offset = circumference - (data.trustScore / 100) * circumference;
 
-  const displaySummary =
-    language === "hi" ? data.summary_hi
-    : language === "mr" ? data.summary_mr
-    : data.summary;
+  const displaySummary = data.summary;
 
   const { displayed: typedSummary, done: typingDone } = useTypingEffect(displaySummary, 12);
 
@@ -126,11 +123,11 @@ const Dashboard: React.FC<DashboardProps> = ({ data, language }) => {
   };
 
   return (
-    <section className="grid grid-cols-1 lg:grid-cols-12 gap-6 w-full animate-fade-in">
+    <section className="grid grid-cols-1 lg:grid-cols-12 gap-6 w-full">
 
       {/* Trust Score Card */}
       <div className="lg:col-span-4 xl:col-span-3">
-        <div className="glass-panel h-full rounded-2xl p-6 flex flex-col items-center justify-between text-center relative overflow-hidden">
+        <div className="glass-panel h-full rounded-2xl p-6 flex flex-col items-center justify-between text-center relative overflow-hidden card-hover opacity-0 animate-slide-up">
           <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-primary to-transparent opacity-50" />
 
           <div className="w-full flex justify-between items-center mb-6">
@@ -167,9 +164,6 @@ const Dashboard: React.FC<DashboardProps> = ({ data, language }) => {
             {[
               { label: "Factual Accuracy", value: data.factualAccuracy, color: data.factualAccuracy === "High" ? "text-primary" : data.factualAccuracy === "Medium" ? "text-yellow-500" : "text-red-500" },
               { label: "Bias Rating", value: data.biasRating, color: BIAS_COLOR[data.biasRating] || "text-slate-400" },
-              ...(data.sourceReputation && data.sourceReputation.score !== -1
-                ? [{ label: "Source Rep.", value: `${data.sourceReputation.score}% · ${data.sourceReputation.label}`, color: data.sourceReputation.score >= 70 ? "text-primary" : "text-yellow-500" }]
-                : []),
             ].map(({ label, value, color }) => (
               <div key={label} className="flex justify-between items-center text-sm p-3 bg-white/50 dark:bg-white/5 rounded-xl border border-gray-100 dark:border-white/5">
                 <span className="text-slate-600 dark:text-slate-300">{label}</span>
@@ -182,7 +176,7 @@ const Dashboard: React.FC<DashboardProps> = ({ data, language }) => {
 
       {/* AI Analysis Card — with typing effect */}
       <div className="lg:col-span-8 xl:col-span-6">
-        <div className="bg-white dark:bg-card-dark h-full rounded-2xl p-8 border border-gray-200 dark:border-white/5 shadow-sm relative flex flex-col">
+        <div className="bg-white dark:bg-card-dark h-full rounded-2xl p-8 border border-gray-200 dark:border-white/5 shadow-sm relative flex flex-col card-hover opacity-0 animate-slide-up" style={{ animationDelay: '100ms' }}>
           <div className="flex items-center justify-between mb-6">
             <div className="flex items-center gap-3">
               <div className="p-2 bg-blue-500/10 rounded-lg text-blue-500">
@@ -267,7 +261,7 @@ const Dashboard: React.FC<DashboardProps> = ({ data, language }) => {
 
           <div className="mt-auto pt-4 border-t border-gray-100 dark:border-white/5 flex gap-3 flex-wrap">
             {data.tags.map((tag, idx) => (
-              <span key={idx} className="px-3 py-1.5 rounded-full bg-slate-100 dark:bg-surface-dark text-slate-600 dark:text-slate-300 text-xs font-medium border border-gray-200 dark:border-white/5">
+              <span key={idx} className="px-3 py-1.5 rounded-full bg-slate-100 dark:bg-surface-dark text-slate-600 dark:text-slate-300 text-xs font-medium border border-gray-200 dark:border-white/5 hover:bg-primary/10 hover:text-primary hover:border-primary/20 transition-all duration-200 cursor-default">
                 #{tag}
               </span>
             ))}
@@ -277,7 +271,7 @@ const Dashboard: React.FC<DashboardProps> = ({ data, language }) => {
 
       {/* Cross Reference Sidebar — clickable links */}
       <div className="lg:col-span-12 xl:col-span-3 flex flex-col gap-6">
-        <div className="bg-white dark:bg-card-dark flex-1 rounded-2xl p-6 border border-gray-200 dark:border-white/5 shadow-sm">
+        <div className="bg-white dark:bg-card-dark flex-1 rounded-2xl p-6 border border-gray-200 dark:border-white/5 shadow-sm card-hover opacity-0 animate-slide-up" style={{ animationDelay: '200ms' }}>
           <div className="flex items-center justify-between mb-6">
             <h3 className="text-sm font-bold text-slate-400 uppercase tracking-widest">Cross-Reference</h3>
             <span className="material-symbols-outlined text-slate-400 text-[18px]">open_in_new</span>

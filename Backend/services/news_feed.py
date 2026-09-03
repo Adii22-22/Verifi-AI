@@ -2,8 +2,9 @@ import datetime as _dt
 import html
 import re
 import xml.etree.ElementTree as ET
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import requests
-
+from services.redis_cache import get_cached_news_feed, set_cached_news_feed
 
 GOOGLE_NEWS_RSS = "https://news.google.com/rss?hl=en-US&gl=US&ceid=US:en"
 
@@ -26,17 +27,15 @@ def _clean_html(text: str) -> str:
 def _fetch_og_image(url: str) -> str | None:
     """Fetch the og:image meta tag from an article page. Returns URL or None."""
     try:
-        resp = requests.get(url, headers=_HEADERS, timeout=5, allow_redirects=True)
+        resp = requests.get(url, headers=_HEADERS, timeout=4, allow_redirects=True)
         if resp.status_code != 200:
             return None
-        # Simple regex — avoid parsing full HTML for speed
         match = re.search(
             r'<meta[^>]+property=["\']og:image["\'][^>]+content=["\']([^"\']+)["\']',
             resp.text,
             re.IGNORECASE,
         )
         if not match:
-            # Try reversed attribute order
             match = re.search(
                 r'<meta[^>]+content=["\']([^"\']+)["\'][^>]+property=["\']og:image["\']',
                 resp.text,
@@ -47,11 +46,16 @@ def _fetch_og_image(url: str) -> str | None:
         return None
 
 
-def fetch_top_news(max_items: int = 12):
+def fetch_top_news(max_items: int = 12) -> list:
     """
     Fetches top headlines from Google News RSS.
     Returns a list of dicts with {title, link, summary, published, image}.
+    Uses Redis cache with a 10-minute TTL.
     """
+    cached = get_cached_news_feed()
+    if cached:
+        return cached
+
     try:
         resp = requests.get(GOOGLE_NEWS_RSS, headers=_HEADERS, timeout=10)
         resp.raise_for_status()
@@ -67,8 +71,12 @@ def fetch_top_news(max_items: int = 12):
     if channel is None:
         return []
 
+    items = channel.findall("item")[:max_items]
+
+    # Parse basic article data first
     articles = []
-    for item in channel.findall("item")[:max_items]:
+    links_to_fetch = []
+    for item in items:
         title = _clean_html(item.findtext("title", default=""))
         link = item.findtext("link", default="") or ""
         description = _clean_html(item.findtext("description", default=""))
@@ -81,17 +89,36 @@ def fetch_top_news(max_items: int = 12):
         except Exception:
             pass
 
-        # Attempt to get og:image (skip if link is empty or Google redirect)
-        image = None
-        if link and not link.startswith("https://news.google.com"):
-            image = _fetch_og_image(link)
-
         articles.append({
             "title": title,
             "link": link,
             "summary": description,
             "published": published,
-            "image": image,  # None if not found
+            "image": None,
         })
+
+        # Only fetch og:image for non-Google-redirect links
+        if link and not link.startswith("https://news.google.com"):
+            links_to_fetch.append((len(articles) - 1, link))
+
+    # Fetch og:image in parallel
+    if links_to_fetch:
+        with ThreadPoolExecutor(max_workers=6) as pool:
+            futures = {
+                pool.submit(_fetch_og_image, link): idx
+                for idx, link in links_to_fetch
+            }
+            for future in as_completed(futures):
+                idx = futures[future]
+                try:
+                    image_url = future.result()
+                    if image_url:
+                        articles[idx]["image"] = image_url
+                except Exception:
+                    pass
+
+    # Update Redis cache (10 min TTL)
+    if articles:
+        set_cached_news_feed(articles, ttl_seconds=600)
 
     return articles

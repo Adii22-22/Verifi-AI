@@ -1,12 +1,17 @@
 import trafilatura
 import json
+from services.redis_cache import get_cached_article, set_cached_article
 
 
 def scrape_article_data(url: str) -> dict:
     """
     Scrapes and extracts main article data (title and text) from a URL.
-    Returns a dict with 'title', 'text' or 'error'.
+    Uses Redis cache with 7-day TTL to avoid re-scraping viral articles.
     """
+    cached = get_cached_article(url)
+    if cached:
+        return cached
+
     try:
         downloaded = trafilatura.fetch_url(url)
         if not downloaded:
@@ -23,7 +28,9 @@ def scrape_article_data(url: str) -> dict:
         if not text or len(text.strip()) < 300:
             return {"error": "ERROR: Article content too short or unreadable."}
 
-        return {"title": title.strip() if title else "", "text": text.strip()}
+        result = {"title": title.strip() if title else "", "text": text.strip()}
+        set_cached_article(url, result, ttl_days=7)
+        return result
 
     except Exception as e:
         return {"error": f"ERROR: Scraping failed ({e})"}

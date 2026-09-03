@@ -1,6 +1,6 @@
 import os
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 from jose import JWTError, jwt
 from passlib.context import CryptContext
@@ -30,7 +30,7 @@ def verify_password(plain: str, hashed: str) -> bool:
 
 
 def create_access_token(user_id: str) -> str:
-    expire = datetime.utcnow() + timedelta(minutes=JWT_EXPIRE_MINUTES)
+    expire = datetime.now(timezone.utc) + timedelta(minutes=JWT_EXPIRE_MINUTES)
     payload = {"sub": user_id, "exp": expire}
     return jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
 

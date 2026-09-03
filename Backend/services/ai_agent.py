@@ -1,9 +1,7 @@
 import os
-import re
 import json
 import logging
 from typing import Dict, Any
-from concurrent.futures import ThreadPoolExecutor
 import requests
 from dotenv import load_dotenv
 from services.search import get_verification_context
@@ -40,7 +38,7 @@ def _groq(prompt: str) -> str:
                 {"role": "user", "content": prompt},
             ],
             "temperature": 0.3,
-            "max_completion_tokens": 4096,
+            "max_completion_tokens": 2048,
             "response_format": {"type": "json_object"},
         },
         timeout=30,
@@ -60,41 +58,11 @@ def _clean(text: str) -> str:
     return c.strip()
 
 
-# ─── Local keyword extraction ─────────────────────────────────────────────────
-
-_STOP = {"the","a","an","is","are","was","were","be","been","being","have","has","had",
-         "do","does","did","will","would","could","should","may","might","shall","can",
-         "it","its","i","me","my","we","our","you","your","he","she","they","them","their",
-         "this","that","these","those","in","on","at","to","for","of","with","by","from",
-         "and","or","but","not","no","if","then","than","so","as","about","into","over",
-         "after","before","between","under","during","also","just","very","too","more",
-         "most","much","many","some","any","all","each","every","both","few","other",
-         "new","old","said","says","like","get","got","go","went","made","make","take",
-         "been","being","which","who","whom","what","when","where","how","why","up","out"}
-
-def _extract_keywords(text: str, max_words: int = 6) -> str:
-    words = re.findall(r'[A-Za-z]+', text[:500])
-    keywords = []
-    seen = set()
-    for w in words:
-        wl = w.lower()
-        if wl not in _STOP and len(wl) > 2 and wl not in seen:
-            keywords.append(w)
-            seen.add(wl)
-        if len(keywords) >= max_words:
-            break
-    return " ".join(keywords) if keywords else text[:100]
-
-
-def generate_search_query(text: str) -> str:
-    return _extract_keywords(text)
-
-
 # ─── Main analysis ────────────────────────────────────────────────────────────
 
 def analyze_credibility(article_text: str, search_query: str = None) -> Dict[str, Any]:
     query = search_query if search_query else article_text[:150]
-    evidence = get_verification_context(query, max_results=4)
+    evidence = get_verification_context(query, max_results=5)
     if not evidence or evidence == "NO_EVIDENCE_FOUND":
         evidence = "No external evidence retrieved."
 
@@ -104,13 +72,9 @@ def analyze_credibility(article_text: str, search_query: str = None) -> Dict[str
 - "factualAccuracy": "High" or "Medium" or "Low"
 - "biasRating": "Left" or "Right" or "Neutral" or "Mixed"
 - "headline": one-line finding summary
-- "headline_hi": Hindi translation of headline
-- "headline_mr": Marathi translation of headline
 - "summary": 2-3 sentence analysis. IMPORTANT: If the claim is FALSE or MISLEADING, you MUST state what the correct/actual fact is. For example: "This claim is false. In reality, [correct fact based on evidence]." Always provide the corrected version so the user learns the truth.
-- "summary_hi": Hindi translation of summary
-- "summary_mr": Marathi translation of summary
 - "tags": array of exactly 3 topic tags
-- "claimVerdict": array of up to 3 objects, each with "claim", "claim_hi", "claim_mr", "verdict" (Verified/False/Unverified/Misleading), "reason" (if verdict is False or Misleading, MUST include the corrected fact here), "reason_hi", "reason_mr"
+- "claimVerdict": array of up to 3 objects, each with "claim", "verdict" (Verified/False/Unverified/Misleading), "reason" (if verdict is False or Misleading, MUST include the corrected fact)
 - "crossReferences": array of up to 3 objects with "source", "sourceInitials", "timeAgo", "trustColor" (primary/yellow/red/gray), "url"
 
 ARTICLE/CLAIM:
@@ -128,10 +92,6 @@ Use actual URLs from evidence. Do NOT fabricate URLs. Be concise."""
         raise Exception(f"JSON parse failed: {e}\nRaw: {raw[:300]}")
 
     # Defaults
-    result.setdefault("summary_hi", result.get("summary", ""))
-    result.setdefault("summary_mr", result.get("summary", ""))
-    result.setdefault("headline_hi", result.get("headline", ""))
-    result.setdefault("headline_mr", result.get("headline", ""))
     result.setdefault("claimVerdict", [])
     result.setdefault("crossReferences", [])
     if not result.get("headline"):
@@ -141,32 +101,6 @@ Use actual URLs from evidence. Do NOT fabricate URLs. Be concise."""
         tags.append("General")
     result["tags"] = tags[:3]
     return result
-
-
-def compare_claims(claim_a: str, claim_b: str) -> Dict[str, Any]:
-    with ThreadPoolExecutor(max_workers=2) as pool:
-        fa = pool.submit(get_verification_context, claim_a, 3)
-        fb = pool.submit(get_verification_context, claim_b, 3)
-        evidence_a = fa.result()
-        evidence_b = fb.result()
-
-    prompt = f"""Compare these two claims for credibility. Return JSON with:
-- "winner": "claim_a" or "claim_b" or "tie"
-- "confidence": "High" or "Medium" or "Low"
-- "reasoning": 3-sentence explanation
-- "claim_a_score": integer 0-100
-- "claim_b_score": integer 0-100
-- "claim_a_verdict": "Verified" or "False" or "Misleading" or "Unverified"
-- "claim_b_verdict": "Verified" or "False" or "Misleading" or "Unverified"
-- "summary": one-sentence summary
-
-CLAIM A: {claim_a}
-CLAIM B: {claim_b}
-EVIDENCE A: {evidence_a[:1500] if evidence_a != 'NO_EVIDENCE_FOUND' else 'None.'}
-EVIDENCE B: {evidence_b[:1500] if evidence_b != 'NO_EVIDENCE_FOUND' else 'None.'}"""
-
-    raw = _groq(prompt)
-    return json.loads(raw)
 
 
 # ─── Image Analysis (Gemini Vision only) ──────────────────────────────────────
@@ -190,7 +124,7 @@ def analyze_image(image_b64: str, mime_type: str = "image/jpeg") -> Dict[str, An
     extracted_text = getattr(extract_resp, "text", "") or ""
 
     search_text = extracted_text[:150] if extracted_text.strip() else "news image"
-    evidence = get_verification_context(search_text, max_results=4)
+    evidence = get_verification_context(search_text, max_results=5)
     if not evidence or evidence == "NO_EVIDENCE_FOUND":
         evidence = "No external evidence."
 
@@ -203,14 +137,10 @@ def analyze_image(image_b64: str, mime_type: str = "image/jpeg") -> Dict[str, An
 - "factualAccuracy": "High" or "Medium" or "Low"
 - "biasRating": "Left" or "Right" or "Neutral" or "Mixed"
 - "headline": one-line summary
-- "headline_hi": Hindi translation
-- "headline_mr": Marathi translation
 - "summary": 2-3 sentence analysis
-- "summary_hi": Hindi translation
-- "summary_mr": Marathi translation
 - "tags": array of 3 topic tags
-- "claimVerdict": array of up to 3 claim objects
-- "crossReferences": array of up to 3 source objects
+- "claimVerdict": array of up to 3 claim objects with "claim", "verdict", "reason"
+- "crossReferences": array of up to 3 source objects with "source", "sourceInitials", "timeAgo", "trustColor", "url"
 
 EXTRACTED TEXT: {extracted_text[:2500]}
 EVIDENCE: {evidence[:2500]}
@@ -226,10 +156,6 @@ Use actual URLs from evidence."""
     raw = _clean(getattr(response, "text", "") or "")
     result = json.loads(raw)
 
-    result.setdefault("summary_hi", result.get("summary", ""))
-    result.setdefault("summary_mr", result.get("summary", ""))
-    result.setdefault("headline_hi", result.get("headline", ""))
-    result.setdefault("headline_mr", result.get("headline", ""))
     result.setdefault("claimVerdict", [])
     result.setdefault("crossReferences", [])
     result.setdefault("manipulation_signs", [])

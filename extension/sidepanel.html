@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Verifi.ai — Side Panel</title>
+  <link rel="stylesheet" href="sidepanel.css">
+</head>
+<body>
+  <!-- Header -->
+  <header class="sp-header">
+    <div class="sp-brand">
+      <div class="sp-logo">V</div>
+      <div>
+        <h1 class="sp-title">Verifi.ai</h1>
+        <div class="sp-status">
+          <span class="status-dot" id="status-dot"></span>
+          <span id="status-text">Connecting...</span>
+        </div>
+      </div>
+    </div>
+    <div class="sp-header-actions">
+      <!-- Simple Black & White Theme Switcher -->
+      <button id="btn-theme-toggle" class="sp-theme-toggle" title="Switch Black / White mode">
+        <span id="theme-icon">☀️</span>
+        <span id="theme-label">Light</span>
+      </button>
+    </div>
+  </header>
+
+  <!-- Main Content Area -->
+  <main class="sp-main">
+    <!-- Active Tab Context Box -->
+    <section class="sp-card" id="tab-card">
+      <div class="sp-card-header">
+        <span class="sp-label">Active Webpage</span>
+        <button id="btn-refresh-tab" class="sp-icon-btn" title="Refresh active tab info">↺</button>
+      </div>
+      <div class="sp-tab-info">
+        <div class="sp-tab-title" id="tab-title">Loading active tab...</div>
+        <div class="sp-tab-url" id="tab-url">about:blank</div>
+      </div>
+      <div class="sp-actions-row">
+        <button id="btn-analyze-page" class="sp-btn sp-btn-primary">
+          <span class="btn-icon">⚡</span>
+          <span>Analyze This Page</span>
+        </button>
+        <button id="btn-snip-area" class="sp-btn sp-btn-secondary" title="Crop & verify an area on the page">
+          <span class="btn-icon">✂️</span>
+          <span>Snip Area</span>
+        </button>
+      </div>
+    </section>
+
+    <!-- Custom Claim / Text Input -->
+    <section class="sp-card" id="input-section">
+      <div class="sp-card-header">
+        <span class="sp-label">Fact-Check Text or Claim</span>
+      </div>
+      <textarea
+        id="text-input"
+        class="sp-textarea"
+        placeholder="Paste a headline, social media post, rumor, or article excerpt here..."
+        rows="3"
+      ></textarea>
+      <div class="sp-input-footer">
+        <button id="btn-analyze-text" class="sp-btn sp-btn-primary full-width">
+          <span>Verify Claim</span>
+        </button>
+      </div>
+    </section>
+
+    <!-- Loading State -->
+    <div id="loading-state" class="sp-loading sp-hidden">
+      <div class="sp-spinner"></div>
+      <p id="loading-text" class="sp-loading-text">Gathering evidence from verified news sources...</p>
+      <span class="sp-loading-sub">Analyzing credibility & detecting bias</span>
+    </div>
+
+    <!-- Error State -->
+    <div id="error-state" class="sp-error sp-hidden">
+      <div class="sp-error-icon">⚠️</div>
+      <h3 class="sp-error-title">Verification Issue</h3>
+      <p id="error-message" class="sp-error-desc">Could not connect to backend.</p>
+      <button id="btn-retry" class="sp-btn sp-btn-secondary">Try Again</button>
+    </div>
+
+    <!-- Results Container -->
+    <section id="result-container" class="sp-results sp-hidden">
+      <div class="sp-results-header">
+        <span class="sp-label">Verification Results</span>
+        <button id="btn-clear-results" class="sp-link-btn">Clear</button>
+      </div>
+
+      <!-- Trust Score Banner -->
+      <div class="sp-score-card">
+        <div class="sp-ring-wrapper">
+          <svg class="sp-ring-svg" viewBox="0 0 80 80">
+            <circle class="sp-ring-bg" cx="40" cy="40" r="34" />
+            <circle id="sp-ring-fill" class="sp-ring-fill" cx="40" cy="40" r="34" />
+          </svg>
+          <div class="sp-score-text">
+            <span id="score-number" class="sp-score-num">0</span>
+            <span class="sp-score-max">/100</span>
+          </div>
+        </div>
+        <div class="sp-score-meta">
+          <div class="sp-score-verdict" id="score-verdict">Evaluating</div>
+          <div class="sp-pills">
+            <span class="sp-pill" id="pill-accuracy">Accuracy: —</span>
+            <span class="sp-pill" id="pill-bias">Bias: —</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Manipulation Warning (if image snip) -->
+      <div id="manipulation-banner" class="sp-alert sp-hidden">
+        <span class="sp-alert-icon">⚠️</span>
+        <div>
+          <strong id="manipulation-title">Image Manipulation Detected</strong>
+          <ul id="manipulation-list" class="sp-alert-list"></ul>
+        </div>
+      </div>
+
+      <!-- Finding Headline -->
+      <div class="sp-card">
+        <span class="sp-label">Key Finding</span>
+        <h2 id="result-headline" class="sp-headline">Headline</h2>
+      </div>
+
+      <!-- AI Summary -->
+      <div class="sp-card">
+        <span class="sp-label">AI Summary & Facts</span>
+        <p id="result-summary" class="sp-summary">Analysis summary...</p>
+      </div>
+
+      <!-- Claim Verdicts -->
+      <div class="sp-card" id="claims-card">
+        <span class="sp-label">Claim Breakdown</span>
+        <div id="claims-list" class="sp-claims-list"></div>
+      </div>
+
+      <!-- Evidence / Cross References -->
+      <div class="sp-card" id="sources-card">
+        <span class="sp-label">News Sources & Evidence</span>
+        <div id="sources-list" class="sp-sources-list"></div>
+      </div>
+
+      <!-- Tags -->
+      <div id="tags-container" class="sp-tags"></div>
+    </section>
+  </main>
+
+  <!-- Footer -->
+  <footer class="sp-footer">
+    <span>Verifi.ai v2.0</span>
+    <a href="http://localhost:5173" target="_blank" rel="noopener noreferrer" class="sp-link">Open Web Dashboard ↗</a>
+  </footer>
+
+  <script src="sidepanel.js"></script>
+</body>
+</html>

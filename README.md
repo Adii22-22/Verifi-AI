@@ -55,7 +55,7 @@ The platform integrates real-time search extraction against verified news public
 
 ## Core Capabilities
 
-* **Evidence-Grounded Claim Verification**: Synthesizes verified press coverage using the Tavily Search API constrained to news sources and recent temporal windows (7-day recency), processed through Groq's high-speed inference engine (`llama-3.1-8b-instant`).
+* **Evidence-Grounded Claim Verification**: Synthesizes verified press coverage using the Tavily Search API constrained to news sources and recent temporal windows (7-day recency), processed through Groq's high-speed inference engine (`openai/gpt-oss-20b`).
 * **Multimodal Image Forensics**: Evaluates screenshots, visual claims, and document images for manipulation markers, synthetic artifacts, and contextual mismatches using Google Gemini 2.5 Flash.
 * **Full-Text Article Extraction**: Extracts main article bodies from raw URLs via Trafilatura, stripping boilerplate, ads, and navigation structures before analysis.
 * **Five-Tier Redis Caching Infrastructure**:
